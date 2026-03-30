@@ -1,5 +1,60 @@
 ---
-runAt: 2026-03-30.09-36-06
-title: 强化文件管理器
+runAt: 2026-03-30.11-38-22
+title: 追加多语言模式
 ---
-添加项目（Vault）时，在文件管理器中对可打开的文件进行一个判断（必须是 .obsidian 目录存在的地方可以被打开），其他地方不可以被打开，因为只有 .obsidian 是一个 obsidian 的 Vault 仓库，还有，隐藏目录类似 .r2mo 这种也应该可以呈现，而不需要 MacOS 或 Windows 直接显示隐藏目录才可以。
+模块化后追加 i18n 部分，支持中文和英文，将现有界面进行拆分
+
+## Changes
+- 2026-03-30: [Orchestrator] Completed task - 追加多语言模式
+  - 创建 translations/ 目录，添加中英文翻译文件 (.ts)
+  - 修改 CMakeLists.txt 添加 Qt6::LinguistTools 支持
+  - 创建 TranslationManager 类管理语言切换
+  - 更新 main.cpp 初始化翻译系统，自动检测系统语言
+  - 支持语言: en_US (English), zh_CN (简体中文)
+  - 翻译内容: 菜单、按钮、对话框、提示信息等全部界面文本
+  - 构建时自动生成 .qm 文件 (29 条英文翻译, 32 条中文翻译)
+- 2026-03-30: [Orchestrator] Completed task - 模块化重构
+  - 创建模块化目录结构: src/styles/, src/models/, src/utils/
+  - StyleManager: 样式管理单例，分离 UI 样式代码
+  - VaultModel: Vault 数据模型，管理仓库列表的增删改查
+  - SettingsManager: 配置管理单例，管理应用设置和窗口状态
+  - VaultValidator: Vault 验证器，检查 .obsidian 和 .r2mo 目录
+  - 重构 MainWindow 使用模块化组件，代码更清晰易维护
+  - 更新 CMakeLists.txt 支持模块化编译
+- 2026-03-30: [Orchestrator] Completed task - 主题系统
+  - 创建 src/theme/ 目录，添加 ThemeManager 类
+  - ThemeManager: 主题管理单例，支持 Light/Dark 两种主题
+  - 完整的 Light 和 Dark 主题样式表 (macOS Big Sur/Ventura 风格)
+  - 添加主题切换按钮到工具栏 (🌙/☀️ 图标)
+  - MainWindow 集成 ThemeManager，响应主题切换信号
+  - SettingsManager 添加 theme() 和 setTheme() 方法保存主题偏好
+  - TranslationManager 移动到 src/i18n/ 目录
+  - 移除旧的 StyleManager，使用 ThemeManager 替代
+  - 构建成功，应用正常运行
+- 2026-03-30: [Orchestrator] Completed task - 工具栏布局优化
+  - 语言切换和主题切换按钮移至工具栏右上角
+  - 使用 Spacer 推送按钮到右侧
+  - 语言按钮使用紧凑样式: "中|En" (短文字)
+  - 主题切换使用方形 Unicode 符号: ◐ (亮色模式) / ◑ (暗色模式)
+  - 添加分隔符区分不同功能区域
+- 2026-03-30: [Orchestrator] Completed task - 工具栏按钮重构
+  - 语言切换改用 QButtonGroup + QPushButton 实现 ButtonGroup 样式
+  - 语言按钮显示为 "中|En" 一体化组件（中间有分隔符）
+  - 主题切换使用正方形按钮 (32x32)，显示月亮/太阳图标 (🌙/☀️)
+  - 添加专用样式：#themeBtn, #langBtn, #langGroupWidget, #langSeparator
+  - 语言按钮组容器带边框，内部按钮无边框，看起来像一个整体组件
+  - 更新 Light/Dark 主题样式表支持新按钮样式
+  - 移除旧的 QAction 方式，改用 QPushButton 实现
+- 2026-03-30: [Orchestrator] Completed task - UI 圆角统一
+  - 所有 UI 元素圆角统一改为 3px（菜单、按钮、列表、输入框、对话框等）
+  - 语言按钮改为正方形 (28x28)，两个正方形并排显示 "中|En"
+- 2026-03-30: [Orchestrator] Completed task - 按钮尺寸统一与闪烁修复
+  - 所有工具栏按钮统一为 32x32 正方形
+  - 样式表强制设置 min-width/max-width/min-height/max-height
+  - 语言按钮组容器和分隔符也设置固定高度 32px
+  - 所有按钮添加手型光标 (Qt::PointingHandCursor)
+  - 修复语言切换时的闪烁问题：使用 setUpdatesEnabled() 包裹 UI 更新
+  - 优化 retranslateUi()：不再清空重建菜单栏，直接更新菜单项文本
+  - 左下角按钮固定高度 32px，防止语言切换时高度变化
+  - 语言按钮改为分段控件样式：左边按钮左圆角，右边按钮右圆角，紧密连接
+  - 标题标签固定高度 24px，防止文字变化时闪烁

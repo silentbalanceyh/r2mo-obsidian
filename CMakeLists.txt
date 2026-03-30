@@ -12,17 +12,59 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
     set(CMAKE_PREFIX_PATH "/Users/lang/Qt/6.10.0/macos")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets LinguistTools)
 
-qt_add_executable(ObsidianManager
+# Source files - Modular structure
+set(SOURCES
+    # Main
     src/main.cpp
+    
+    # UI
     src/mainwindow.cpp
     src/mainwindow.h
+    
+    # Theme
+    src/theme/thememanager.cpp
+    src/theme/thememanager.h
+    
+    # i18n
+    src/i18n/translationmanager.cpp
+    src/i18n/translationmanager.h
+    
+    # Models
+    src/models/vaultmodel.cpp
+    src/models/vaultmodel.h
+    
+    # Utils
+    src/utils/settingsmanager.cpp
+    src/utils/settingsmanager.h
+    src/utils/vaultvalidator.cpp
+    src/utils/vaultvalidator.h
 )
+
+# Translation files
+set(TS_FILES
+    translations/obsidianmanager_zh_CN.ts
+    translations/obsidianmanager_en_US.ts
+)
+
+# Generate .qm files from .ts files
+qt_add_translations(ObsidianManager TS_FILES ${TS_FILES})
+
+qt_add_executable(ObsidianManager ${SOURCES})
 
 target_link_libraries(ObsidianManager PRIVATE
     Qt6::Core
     Qt6::Widgets
+)
+
+# Include directories
+target_include_directories(ObsidianManager PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/theme
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/i18n
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/models
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
 )
 
 # macOS bundle settings

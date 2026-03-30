@@ -5,15 +5,16 @@
 #include <QListWidget>
 #include <QTextEdit>
 #include <QSplitter>
-#include <QMenuBar>
-#include <QMenu>
-#include <QAction>
-#include <QSettings>
-#include <QProcess>
-#include <QJsonObject>
-#include <QJsonArray>
-#include <QFile>
-#include <QDir>
+#include <QToolBar>
+#include <QButtonGroup>
+#include <QPushButton>
+#include <QLabel>
+#include "theme/thememanager.h"
+
+// Forward declarations
+class VaultModel;
+class SettingsManager;
+class VaultValidator;
 
 class MainWindow : public QMainWindow
 {
@@ -26,30 +27,51 @@ public:
 private slots:
     void onAddVault();
     void onRemoveVault();
-    void onOpenVault();
     void onOpenInObsidian();
     void onSettings();
     void onVaultSelected(QListWidgetItem *item);
     void onAbout();
+    void onLanguageChanged(const QString& languageCode);
+    void onLanguageButtonClicked(int id);
+    void onThemeChanged(ThemeManager::Theme theme);
+    void onThemeToggle();
 
 private:
     void setupMenuBar();
+    void setupToolBar();
     void setupCentralWidget();
-    void loadVaults();
-    void saveVaults();
+    void setupConnections();
     void updateVaultList();
-    QString getObsidianAppPath();
-    void openVaultInObsidian(const QString &vaultPath);
+    void updatePreviewPane(const QString& name, const QString& path);
+    void openVaultInObsidian(const QString& vaultPath);
+    void retranslateUi();
+    void updateLanguageButtons();
+    void updateThemeToggleIcon();
 
-    // UI components
+    // Toolbar
+    QToolBar *m_toolBar;
+    QPushButton *m_themeBtn;
+    QButtonGroup *m_langGroup;
+    QPushButton *m_btnZh;
+    QPushButton *m_btnEn;
+    
+    // Central widget
     QSplitter *m_splitter;
+    QLabel *m_vaultLabel;
     QListWidget *m_vaultList;
+    QPushButton *m_addBtn;
+    QPushButton *m_removeBtn;
+    QPushButton *m_openBtn;
+    QLabel *m_previewLabel;
     QTextEdit *m_previewPane;
 
-    // Data
-    QJsonArray m_vaults;
+    // Modules (not owned)
+    VaultModel *m_vaultModel;
+    SettingsManager *m_settingsManager;
+    VaultValidator *m_vaultValidator;
+    
+    // Config path
     QString m_configPath;
-    QString m_obsidianAppPath;
 };
 
 #endif // MAINWINDOW_H

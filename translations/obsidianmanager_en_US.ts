@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="en_US">
+<context>
+    <name>MainWindow</name>
+    <message>
+        <source>File</source>
+        <translation>File</translation>
+    </message>
+    <message>
+        <source>Edit</source>
+        <translation>Edit</translation>
+    </message>
+    <message>
+        <source>Help</source>
+        <translation>Help</translation>
+    </message>
+    <message>
+        <source>Add Vault...</source>
+        <translation>Add Vault...</translation>
+    </message>
+    <message>
+        <source>Remove Vault</source>
+        <translation>Remove Vault</translation>
+    </message>
+    <message>
+        <source>Open in Obsidian</source>
+        <translation>Open in Obsidian</translation>
+    </message>
+    <message>
+        <source>Exit</source>
+        <translation>Exit</translation>
+    </message>
+    <message>
+        <source>Settings...</source>
+        <translation>Settings...</translation>
+    </message>
+    <message>
+        <source>About</source>
+        <translation>About</translation>
+    </message>
+    <message>
+        <source>Vaults</source>
+        <translation>Vaults</translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation>Preview</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Add</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Remove</translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation>Open</translation>
+    </message>
+    <message>
+        <source>Select a vault to view details...</source>
+        <translation>Select a vault to view details...</translation>
+    </message>
+    <message>
+        <source>Select Obsidian Vault Directory</source>
+        <translation>Select Obsidian Vault Directory</translation>
+    </message>
+    <message>
+        <source>Invalid Vault</source>
+        <translation>Invalid Vault</translation>
+    </message>
+    <message>
+        <source>Vault Name</source>
+        <translation>Vault Name</translation>
+    </message>
+    <message>
+        <source>Enter vault name:</source>
+        <translation>Enter vault name:</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>Warning</translation>
+    </message>
+    <message>
+        <source>No vault selected.</source>
+        <translation>No vault selected.</translation>
+    </message>
+    <message>
+        <source>Obsidian App Path</source>
+        <translation>Obsidian App Path</translation>
+    </message>
+    <message>
+        <source>Enter Obsidian.app path:</source>
+        <translation>Enter Obsidian.app path:</translation>
+    </message>
+    <message>
+        <source>Files:</source>
+        <translation>Files:</translation>
+    </message>
+    <message>
+        <source>Folders:</source>
+        <translation>Folders:</translation>
+    </message>
+    <message>
+        <source>Hidden items:</source>
+        <translation>Hidden items:</translation>
+    </message>
+    <message>
+        <source>Valid Obsidian Vault</source>
+        <translation>Valid Obsidian Vault</translation>
+    </message>
+    <message>
+        <source>R2MO configuration detected</source>
+        <translation>R2MO configuration detected</translation>
+    </message>
+    <message>
+        <source>Path does not exist</source>
+        <translation>Path does not exist</translation>
+    </message>
+</context>
+</TS>
