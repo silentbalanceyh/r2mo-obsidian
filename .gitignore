@@ -1,0 +1,42 @@
+# Build directories
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.ninja
+
+# Qt generated files
+*.autosave
+moc_*.cpp
+moc_*.h
+ui_*.h
+qrc_*.cpp
+*_automoc.cpp
+*.qm
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.app
+
+# IDE files
+.vscode/
+.idea/
+*.pro.user
+*.creator.user
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Logs
+*.log
+
+# Keep .r2mo directory (project metadata)
+# .r2mo/ is NOT ignored

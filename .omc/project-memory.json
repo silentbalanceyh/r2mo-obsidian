@@ -29,6 +29,13 @@
   },
   "customNotes": [],
   "directoryMap": {},
-  "hotPaths": [],
+  "hotPaths": [
+    {
+      "path": ".r2mo/task/task-001.md",
+      "accessCount": 1,
+      "lastAccessed": 1774832795278,
+      "type": "file"
+    }
+  ],
   "userDirectives": []
 }
