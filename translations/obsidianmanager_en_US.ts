@@ -56,6 +56,10 @@
         <translation>Remove</translation>
     </message>
     <message>
+        <source>Rename</source>
+        <translation>Rename</translation>
+    </message>
+    <message>
         <source>Open</source>
         <translation>Open</translation>
     </message>
@@ -78,6 +82,18 @@
     <message>
         <source>Enter vault name:</source>
         <translation>Enter vault name:</translation>
+    </message>
+    <message>
+        <source>Rename Vault</source>
+        <translation>Rename Vault</translation>
+    </message>
+    <message>
+        <source>Enter new name:</source>
+        <translation>Enter new name:</translation>
+    </message>
+    <message>
+        <source>Context Menu</source>
+        <translation>Context Menu</translation>
     </message>
     <message>
         <source>Warning</source>

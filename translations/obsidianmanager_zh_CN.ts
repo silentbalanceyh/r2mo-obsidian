@@ -56,6 +56,10 @@
         <translation>移除</translation>
     </message>
     <message>
+        <source>Rename</source>
+        <translation>重命名</translation>
+    </message>
+    <message>
         <source>Open</source>
         <translation>打开</translation>
     </message>
@@ -82,6 +86,18 @@
     <message>
         <source>Enter vault name:</source>
         <translation>输入仓库名称:</translation>
+    </message>
+    <message>
+        <source>Rename Vault</source>
+        <translation>重命名仓库</translation>
+    </message>
+    <message>
+        <source>Enter new name:</source>
+        <translation>输入新名称:</translation>
+    </message>
+    <message>
+        <source>Context Menu</source>
+        <translation>上下文菜单</translation>
     </message>
     <message>
         <source>Warning</source>
@@ -132,6 +148,66 @@ Please set it in Settings.</source>
     <message>
         <source>&lt;h2&gt;Obsidian Manager&lt;/h2&gt;&lt;p style='color: #86868b;'&gt;Version 1.0.0&lt;/p&gt;&lt;p&gt;A centralized vault management tool for Obsidian.&lt;/p&gt;&lt;p style='margin-top: 16px;'&gt;&lt;b&gt;Features:&lt;/b&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Manage multiple vaults&lt;/li&gt;&lt;li&gt;Validate Obsidian vault structure&lt;/li&gt;&lt;li&gt;Show hidden directories (.obsidian, .r2mo, etc.)&lt;/li&gt;&lt;li&gt;Quick vault switching&lt;/li&gt;&lt;li&gt;Open vaults in Obsidian&lt;/li&gt;&lt;/ul&gt;&lt;p style='color: #86868b; margin-top: 16px;'&gt;Built with Qt 6.10.0&lt;/p&gt;</source>
         <translation>&lt;h2&gt;Obsidian 管理器&lt;/h2&gt;&lt;p style='color: #86868b;'&gt;版本 1.0.0&lt;/p&gt;&lt;p&gt;Obsidian 仓库集中管理工具。&lt;/p&gt;&lt;p style='margin-top: 16px;'&gt;&lt;b&gt;功能特性:&lt;/b&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;管理多个仓库&lt;/li&gt;&lt;li&gt;验证 Obsidian 仓库结构&lt;/li&gt;&lt;li&gt;显示隐藏目录 (.obsidian, .r2mo 等)&lt;/li&gt;&lt;li&gt;快速切换仓库&lt;/li&gt;&lt;li&gt;在 Obsidian 中打开仓库&lt;/li&gt;&lt;/ul&gt;&lt;p style='color: #86868b; margin-top: 16px;'&gt;基于 Qt 6.10.0 构建&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source>Add Obsidian Vault</source>
+        <translation>添加 Obsidian 仓库</translation>
+    </message>
+    <message>
+        <source>Select an Obsidian Vault:</source>
+        <translation>选择一个 Obsidian 仓库:</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation>名称</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>状态</translation>
+    </message>
+    <message>
+        <source>Path</source>
+        <translation>路径</translation>
+    </message>
+    <message>
+        <source>Loading...</source>
+        <translation>加载中...</translation>
+    </message>
+    <message>
+        <source>Known Vaults (from Obsidian)</source>
+        <translation>已知仓库 (来自 Obsidian)</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <source>Select Vault</source>
+        <translation>选择仓库</translation>
+    </message>
+    <message>
+        <source>Please select a valid Obsidian vault (📁 items).</source>
+        <translation>请选择一个有效的 Obsidian 仓库 (📁 项目)。</translation>
+    </message>
+    <message>
+        <source>📁 = Vault (can be added)  |  📂 = Directory (expand to navigate)  |  ● Open = Currently open in Obsidian</source>
+        <translation>📁 = 仓库 (可添加)  |  📂 = 目录 (展开导航)  |  ● Open = 当前在 Obsidian 中打开</translation>
+    </message>
+    <message>
+        <source>Switch to Dark Mode</source>
+        <translation>切换到暗色模式</translation>
+    </message>
+    <message>
+        <source>Switch to Light Mode</source>
+        <translation>切换到亮色模式</translation>
+    </message>
+    <message>
+        <source>Toolbar</source>
+        <translation>工具栏</translation>
+    </message>
+    <message>
+        <source>Language</source>
+        <translation>语言</translation>
     </message>
 </context>
 </TS>

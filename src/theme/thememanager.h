@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QMap>
+#include <QFont>
 
 class ThemeManager : public QObject
 {
@@ -25,6 +26,10 @@ public:
     QString lightStyle() const;
     QString darkStyle() const;
     QString currentStyle() const;
+    
+    // Font helpers
+    static QFont uiFont();           // Helvetica Neue for UI
+    static QFont monoFont();         // JetBrains Mono for English text (one size larger)
 
 signals:
     void themeChanged(Theme theme);

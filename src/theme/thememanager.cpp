@@ -42,13 +42,27 @@ QString ThemeManager::currentThemeName() const
     return m_themeNames.value(m_currentTheme, "Light");
 }
 
+QFont ThemeManager::uiFont()
+{
+    // PingFang SC for Chinese UI text (14px)
+    return QFont("PingFang SC", 14);
+}
+
+QFont ThemeManager::monoFont()
+{
+    // MesloLGS NF for English text (15px)
+    QFont font("MesloLGS NF", 15);
+    font.setStyleHint(QFont::Monospace);
+    return font;
+}
+
 QString ThemeManager::lightStyle() const
 {
     return R"(
 /* Light Theme - Global Settings */
 QWidget {
-    font-family: "Helvetica Neue", Arial, sans-serif;
-    font-size: 13px;
+    font-family: "MesloLGS NF", "PingFang SC", sans-serif;
+    font-size: 14px;
     color: #1d1d1f;
 }
 
@@ -63,7 +77,7 @@ QMainWindow {
 
 /* Section Labels */
 QLabel#sectionLabel {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
     color: #1d1d1f;
     padding: 8px 0;
@@ -189,7 +203,7 @@ QTextEdit {
     border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 3px;
     padding: 16px;
-    font-size: 13px;
+    font-size: 15px;
     line-height: 1.5;
     selection-background-color: rgba(0, 122, 255, 0.3);
 }
@@ -268,6 +282,93 @@ QMessageBox QLabel {
 /* Input Dialog */
 QInputDialog {
     background-color: white;
+}
+
+/* Generic Dialog */
+QDialog {
+    background-color: white;
+}
+
+/* Tree Widget */
+QTreeWidget {
+    background-color: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 3px;
+    outline: none;
+}
+
+QTreeWidget::item {
+    padding: 6px 8px;
+    border-radius: 3px;
+}
+
+QTreeWidget::item:selected {
+    background-color: #007aff;
+    color: white;
+}
+
+QTreeWidget::item:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+QTreeWidget::item:selected:hover {
+    background-color: #0066d6;
+}
+
+QTreeWidget::branch {
+    background-color: transparent;
+}
+
+QHeaderView::section {
+    background-color: #f5f5f7;
+    border: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    padding: 8px 12px;
+    font-weight: 600;
+}
+
+QHeaderView::section:hover {
+    background-color: #ebebed;
+}
+
+/* File Dialog */
+QFileDialog {
+    background-color: white;
+}
+
+QFileDialog QLabel {
+    color: #1d1d1f;
+}
+
+QFileDialog QPushButton {
+    background-color: white;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 3px;
+    padding: 6px 16px;
+    font-weight: 500;
+    min-width: 70px;
+}
+
+QFileDialog QPushButton:hover {
+    background-color: #f5f5f7;
+}
+
+QFileDialog QPushButton:default {
+    background-color: #007aff;
+    color: white;
+    border: none;
+}
+
+QFileDialog QListView {
+    background-color: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 3px;
+}
+
+QFileDialog QTreeView {
+    background-color: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 3px;
 }
 
 QLineEdit {
@@ -387,6 +488,27 @@ QPushButton#langBtnRight:checked {
     background-color: #007aff;
     color: white;
 }
+
+/* Edit Button (small icon button) */
+QPushButton#editBtn {
+    background-color: transparent;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 3px;
+    font-size: 14px;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0px;
+}
+
+QPushButton#editBtn:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+QPushButton#editBtn:pressed {
+    background-color: rgba(0, 0, 0, 0.08);
+}
 )";
 }
 
@@ -395,8 +517,8 @@ QString ThemeManager::darkStyle() const
     return R"(
 /* Dark Theme - Global Settings */
 QWidget {
-    font-family: "Helvetica Neue", Arial, sans-serif;
-    font-size: 13px;
+    font-family: "MesloLGS NF", "PingFang SC", sans-serif;
+    font-size: 14px;
     color: #f5f5f7;
 }
 
@@ -411,7 +533,7 @@ QMainWindow {
 
 /* Section Labels */
 QLabel#sectionLabel {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
     color: #f5f5f7;
     padding: 8px 0;
@@ -538,7 +660,7 @@ QTextEdit {
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 3px;
     padding: 16px;
-    font-size: 13px;
+    font-size: 15px;
     line-height: 1.5;
     color: #f5f5f7;
     selection-background-color: rgba(10, 132, 255, 0.3);
@@ -618,6 +740,98 @@ QMessageBox QLabel {
 /* Input Dialog */
 QInputDialog {
     background-color: #2c2c2e;
+}
+
+/* Generic Dialog */
+QDialog {
+    background-color: #2c2c2e;
+}
+
+/* Tree Widget */
+QTreeWidget {
+    background-color: #2c2c2e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    outline: none;
+    color: #f5f5f7;
+}
+
+QTreeWidget::item {
+    padding: 6px 8px;
+    border-radius: 3px;
+}
+
+QTreeWidget::item:selected {
+    background-color: #0a84ff;
+    color: white;
+}
+
+QTreeWidget::item:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+QTreeWidget::item:selected:hover {
+    background-color: #0066cc;
+}
+
+QTreeWidget::branch {
+    background-color: transparent;
+}
+
+QHeaderView::section {
+    background-color: #3a3a3c;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 8px 12px;
+    font-weight: 600;
+    color: #f5f5f7;
+}
+
+QHeaderView::section:hover {
+    background-color: #4a4a4c;
+}
+
+/* File Dialog */
+QFileDialog {
+    background-color: #2c2c2e;
+}
+
+QFileDialog QLabel {
+    color: #f5f5f7;
+}
+
+QFileDialog QPushButton {
+    background-color: #3a3a3c;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    padding: 6px 16px;
+    font-weight: 500;
+    min-width: 70px;
+    color: #f5f5f7;
+}
+
+QFileDialog QPushButton:hover {
+    background-color: #4a4a4c;
+}
+
+QFileDialog QPushButton:default {
+    background-color: #0a84ff;
+    color: white;
+    border: none;
+}
+
+QFileDialog QListView {
+    background-color: #2c2c2e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    color: #f5f5f7;
+}
+
+QFileDialog QTreeView {
+    background-color: #2c2c2e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    color: #f5f5f7;
 }
 
 QLineEdit {
@@ -740,6 +954,27 @@ QPushButton#langBtnRight:hover {
 QPushButton#langBtnRight:checked {
     background-color: #0a84ff;
     color: white;
+}
+
+/* Edit Button (small icon button) */
+QPushButton#editBtn {
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    font-size: 14px;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0px;
+}
+
+QPushButton#editBtn:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+QPushButton#editBtn:pressed {
+    background-color: rgba(255, 255, 255, 0.08);
 }
 )";
 }

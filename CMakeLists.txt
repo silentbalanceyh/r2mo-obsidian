@@ -40,6 +40,13 @@ set(SOURCES
     src/utils/settingsmanager.h
     src/utils/vaultvalidator.cpp
     src/utils/vaultvalidator.h
+    src/utils/obsidianconfigreader.cpp
+    src/utils/obsidianconfigreader.h
+)
+
+# Font resources
+set(FONT_RESOURCES
+    src/fonts/fonts.qrc
 )
 
 # Translation files
@@ -51,7 +58,7 @@ set(TS_FILES
 # Generate .qm files from .ts files
 qt_add_translations(ObsidianManager TS_FILES ${TS_FILES})
 
-qt_add_executable(ObsidianManager ${SOURCES})
+qt_add_executable(ObsidianManager ${SOURCES} ${FONT_RESOURCES})
 
 target_link_libraries(ObsidianManager PRIVATE
     Qt6::Core

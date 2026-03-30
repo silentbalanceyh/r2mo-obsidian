@@ -9,6 +9,7 @@
 #include <QButtonGroup>
 #include <QPushButton>
 #include <QLabel>
+#include <QLineEdit>
 #include "theme/thememanager.h"
 
 // Forward declarations
@@ -27,9 +28,13 @@ public:
 private slots:
     void onAddVault();
     void onRemoveVault();
+    void onRenameVault();
     void onOpenInObsidian();
     void onSettings();
     void onVaultSelected(QListWidgetItem *item);
+    void onVaultDoubleClicked(QListWidgetItem *item);
+    void onVaultContextMenu(const QPoint &pos);
+    void onVaultItemChanged(QListWidgetItem *item);
     void onAbout();
     void onLanguageChanged(const QString& languageCode);
     void onLanguageButtonClicked(int id);
@@ -44,6 +49,9 @@ private:
     void updateVaultList();
     void updatePreviewPane(const QString& name, const QString& path);
     void openVaultInObsidian(const QString& vaultPath);
+    void onPreviewEditClicked();
+    void onPreviewTitleEditFinished();
+    void onPreviewTitleReturnPressed();
     void retranslateUi();
     void updateLanguageButtons();
     void updateThemeToggleIcon();
@@ -61,14 +69,21 @@ private:
     QListWidget *m_vaultList;
     QPushButton *m_addBtn;
     QPushButton *m_removeBtn;
-    QPushButton *m_openBtn;
     QLabel *m_previewLabel;
+    QWidget *m_previewHeader;
+    QLabel *m_previewTitle;
+    QPushButton *m_previewEditBtn;
+    QLineEdit *m_previewTitleEdit;
     QTextEdit *m_previewPane;
+    QString m_currentPreviewPath;
 
     // Modules (not owned)
     VaultModel *m_vaultModel;
     SettingsManager *m_settingsManager;
     VaultValidator *m_vaultValidator;
+    
+    // For tracking rename
+    QString m_editingVaultPath;
     
     // Config path
     QString m_configPath;

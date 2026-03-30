@@ -1,0 +1,7 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/fonts">
+        <file>MesloLGS-NF-Regular.ttf</file>
+        <file>MesloLGS-NF-Bold.ttf</file>
+    </qresource>
+</RCC>

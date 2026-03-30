@@ -13,6 +13,9 @@ public:
     bool hasR2moConfig(const QString& path) const;
     
     QString validationMessage(const QString& path) const;
+    
+    // Get vault name from .obsidian/app.json, fallback to directory name
+    QString getVaultName(const QString& path) const;
 
 private:
     VaultValidator() = default;
