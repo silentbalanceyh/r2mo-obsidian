@@ -4,6 +4,7 @@
 #include "utils/settingsmanager.h"
 #include "utils/vaultvalidator.h"
 #include "utils/obsidianconfigreader.h"
+#include "utils/r2moscanner.h"
 #include "i18n/translationmanager.h"
 
 #include <QMenuBar>
@@ -18,11 +19,23 @@
 #include <QTreeWidget>
 #include <QHeaderView>
 #include <QStandardPaths>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QProcess>
+#include <QGraphicsRectItem>
+#include <QGraphicsTextItem>
+#include <QGraphicsLineItem>
+#include <QGraphicsPolygonItem>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QGraphicsDropShadowEffect>
 #include <QFileInfo>
 #include <QDir>
 #include <QProcess>
 #include <QButtonGroup>
+#include <QTabWidget>
+#include <QWheelEvent>
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
@@ -40,8 +53,16 @@ MainWindow::MainWindow(QWidget *parent)
     , m_previewHeader(nullptr)
     , m_previewTitle(nullptr)
     , m_previewEditBtn(nullptr)
+    , m_previewOpenBtn(nullptr)
     , m_previewTitleEdit(nullptr)
     , m_previewPane(nullptr)
+    , m_tabWidget(nullptr)
+    , m_overviewTab(nullptr)
+    , m_tasksTab(nullptr)
+    , m_graphTab(nullptr)
+    , m_graphView(nullptr)
+    , m_graphScene(nullptr)
+    , m_taskTree(nullptr)
     , m_vaultModel(nullptr)
     , m_settingsManager(nullptr)
     , m_vaultValidator(nullptr)
@@ -306,7 +327,7 @@ void MainWindow::setupCentralWidget()
 
     m_splitter->addWidget(leftPanel);
 
-    // Right: Preview panel
+    // Right: Tab widget with three tabs
     QWidget *rightPanel = new QWidget;
     rightPanel->setObjectName("rightPanel");
     QVBoxLayout *rightLayout = new QVBoxLayout(rightPanel);
@@ -319,7 +340,7 @@ void MainWindow::setupCentralWidget()
     m_previewLabel->setFixedHeight(36);
     rightLayout->addWidget(m_previewLabel);
 
-    // Preview header with title and edit button
+    // Preview header with title and buttons
     m_previewHeader = new QWidget;
     QHBoxLayout *headerLayout = new QHBoxLayout(m_previewHeader);
     headerLayout->setContentsMargins(0, 0, 0, 8);
@@ -339,6 +360,14 @@ void MainWindow::setupCentralWidget()
     m_previewTitle->setText(tr("Select a vault..."));
     headerLayout->addWidget(m_previewTitle, 1);
     
+    m_previewOpenBtn = new QPushButton(tr("Open"));
+    m_previewOpenBtn->setObjectName("primaryBtn");
+    m_previewOpenBtn->setFixedHeight(28);
+    m_previewOpenBtn->setCursor(Qt::PointingHandCursor);
+    m_previewOpenBtn->setToolTip(tr("Open in Obsidian"));
+    m_previewOpenBtn->hide();
+    headerLayout->addWidget(m_previewOpenBtn);
+    
     m_previewTitleEdit = new QLineEdit;
     m_previewTitleEdit->setObjectName("previewTitleEdit");
     m_previewTitleEdit->setStyleSheet("QLineEdit#previewTitleEdit { font-size: 18px; font-weight: 600; background: white; border: 2px solid #007aff; border-radius: 3px; padding: 4px 8px; }");
@@ -347,18 +376,73 @@ void MainWindow::setupCentralWidget()
     
     rightLayout->addWidget(m_previewHeader);
 
-    // Preview pane with shadow
+    // Create tab widget
+    m_tabWidget = new QTabWidget;
+    m_tabWidget->setObjectName("previewTabs");
+    // Tab styling: left-aligned, trapezoid shape (no rounded corners), active tab matches page background
+    m_tabWidget->setStyleSheet(
+        "QTabWidget::pane { border: none; background: white; }"
+        "QTabWidget::tab-bar { alignment: left; }"
+        "QTabBar::tab { padding: 8px 20px; margin-right: 0px; border: 1px solid #e0e0e0; border-bottom: none; border-radius: 0px; background: #f5f5f7; }"
+        "QTabBar::tab:selected { background: white; color: #007aff; border-bottom: 1px solid white; }"
+        "QTabBar::tab:!selected { background: #e8e8ed; color: #86868b; margin-top: 2px; }"
+    );
+    
+    // Tab 1: Overview (概览)
+    m_overviewTab = new QWidget;
+    QVBoxLayout *overviewLayout = new QVBoxLayout(m_overviewTab);
+    overviewLayout->setContentsMargins(0, 0, 0, 0);
+    overviewLayout->setSpacing(0);
+    
     m_previewPane = new QTextEdit;
     m_previewPane->setReadOnly(true);
     m_previewPane->setPlaceholderText(tr("Select a vault to view details..."));
+    m_previewPane->setStyleSheet("QTextEdit { border: none; background: white; }");
 
-    QGraphicsDropShadowEffect *previewShadow = new QGraphicsDropShadowEffect;
-    previewShadow->setBlurRadius(20);
-    previewShadow->setColor(QColor(0, 0, 0, 30));
-    previewShadow->setOffset(0, 4);
-    m_previewPane->setGraphicsEffect(previewShadow);
+    overviewLayout->addWidget(m_previewPane, 1);
+    m_tabWidget->addTab(m_overviewTab, tr("概览"));
+    
+    // Tab 2: Project Tasks (项目任务)
+    m_tasksTab = new QWidget;
+    QVBoxLayout *tasksLayout = new QVBoxLayout(m_tasksTab);
+    tasksLayout->setContentsMargins(0, 0, 0, 0);
+    tasksLayout->setSpacing(0);
+    
+    m_taskTree = new QTreeWidget;
+    m_taskTree->setHeaderLabel(tr("Tasks"));
+    m_taskTree->setStyleSheet("QTreeWidget { border: none; background: white; } QTreeWidget::item { padding: 4px; } QTreeWidget::item:selected { background: #007aff; color: white; }");
+    m_taskTree->setAlternatingRowColors(false);
+    m_taskTree->setRootIsDecorated(true);  // Show guide lines
+    m_taskTree->setItemsExpandable(true);   // Allow expand/collapse
+    m_taskTree->setAnimated(true);          // Animate expand/collapse
+    
+    tasksLayout->addWidget(m_taskTree, 1);
+    m_tabWidget->addTab(m_tasksTab, tr("项目任务"));
+    
+    // Tab 3: Structure Graph (结构图) - fill entire page
+    m_graphTab = new QWidget;
+    QVBoxLayout *graphLayout = new QVBoxLayout(m_graphTab);
+    graphLayout->setContentsMargins(0, 0, 0, 0);
+    graphLayout->setSpacing(0);
+    
+    m_graphScene = new QGraphicsScene(this);
+    m_graphView = new QGraphicsView(m_graphScene);
+    m_graphView->setRenderHint(QPainter::Antialiasing);
+    m_graphView->setStyleSheet("QGraphicsView { border: none; background: white; }");
+    m_graphView->setDragMode(QGraphicsView::ScrollHandDrag);
+    m_graphView->setRenderHint(QPainter::SmoothPixmapTransform);
+    m_graphView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+    m_graphView->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+    m_graphView->setResizeAnchor(QGraphicsView::AnchorUnderMouse);
+    m_graphView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_graphView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_graphView->setBackgroundBrush(QBrush(QColor("#fafafa")));
+    m_graphView->installEventFilter(this);  // Install event filter for zoom/pan
+    
+    graphLayout->addWidget(m_graphView, 1);
+    m_tabWidget->addTab(m_graphTab, tr("结构图"));
 
-    rightLayout->addWidget(m_previewPane, 1);
+    rightLayout->addWidget(m_tabWidget, 1);
 
     m_splitter->addWidget(rightPanel);
 
@@ -375,8 +459,10 @@ void MainWindow::setupConnections()
     connect(m_vaultList, &QListWidget::customContextMenuRequested, this, &MainWindow::onVaultContextMenu);
     connect(m_vaultList, &QListWidget::itemChanged, this, &MainWindow::onVaultItemChanged);
     connect(m_previewEditBtn, &QPushButton::clicked, this, &MainWindow::onPreviewEditClicked);
+    connect(m_previewOpenBtn, &QPushButton::clicked, this, &MainWindow::onPreviewOpenClicked);
     connect(m_previewTitleEdit, &QLineEdit::editingFinished, this, &MainWindow::onPreviewTitleEditFinished);
     connect(m_previewTitleEdit, &QLineEdit::returnPressed, this, &MainWindow::onPreviewTitleReturnPressed);
+    connect(m_taskTree, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onTaskItemDoubleClicked);
     connect(m_vaultModel, &VaultModel::modelChanged, this, &MainWindow::updateVaultList);
     connect(TranslationManager::instance(), &TranslationManager::languageChanged, 
             this, &MainWindow::onLanguageChanged);
@@ -811,14 +897,36 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
 {
     m_currentPreviewPath = path;
     
-    // Update title and show edit button
+    // Update title and show buttons
     m_previewTitle->setText(name);
     m_previewTitle->show();
     m_previewEditBtn->show();
+    m_previewOpenBtn->show();
     m_previewTitleEdit->hide();
     
+    // Clear previous content
+    m_graphScene->clear();
+    m_taskTree->clear();
+    
     QString info;
-    info += tr("<p style='color: #86868b; font-size: 12px; margin-bottom: 16px;'>%1</p>").arg(path);
+    
+    // Table style - full width
+    info += tr("<style>"
+        "body { margin: 0; padding: 0; }"
+        "table { width: 100%; border-collapse: collapse; margin-bottom: 0; table-layout: fixed; }"
+        "th { text-align: left; padding: 14px 20px; background: #f5f5f7; font-weight: 600; border-bottom: 2px solid #e0e0e0; }"
+        "td { padding: 14px 20px; border-bottom: 1px solid #e8e8ed; }"
+        "tr:hover { background: #fafafa; }"
+        ".label { color: #86868b; width: 50%; }"
+        ".value { font-weight: 500; width: 50%; }"
+        ".status-ok { color: #34c759; }"
+        ".status-info { color: #007aff; }"
+        ".status-warning { color: #ff9500; }"
+        ".path-bar { color: #86868b; font-size: 12px; padding: 14px 20px; background: #f5f5f7; border-bottom: 1px solid #e0e0e0; }"
+        "</style>");
+    
+    // Path info
+    info += tr("<div class='path-bar'>%1</div>").arg(path);
 
     QDir vaultDir(path);
     if (vaultDir.exists()) {
@@ -842,28 +950,357 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
             }
         }
 
-        info += tr("<div style='background: #f5f5f7; border-radius: 8px; padding: 12px; margin-bottom: 12px;'>");
-        info += tr("<p style='margin: 4px 0;'><b>Files:</b> %1</p>").arg(files);
-        info += tr("<p style='margin: 4px 0;'><b>Folders:</b> %1</p>").arg(folders);
+        // Vault Statistics Table
+        info += tr("<table>");
+        info += tr("<tr><th colspan='2'>📊 %1</th></tr>").arg(tr("Vault Statistics"));
+        info += tr("<tr><td class='label'>%1</td><td class='value'>%2</td></tr>").arg(tr("Files")).arg(files);
+        info += tr("<tr><td class='label'>%1</td><td class='value'>%2</td></tr>").arg(tr("Folders")).arg(folders);
         if (hiddenItems > 0) {
-            info += tr("<p style='margin: 4px 0; color: #86868b;'><b>Hidden items:</b> %1 (e.g. .obsidian, .r2mo)</p>").arg(hiddenItems);
-        }
-        info += tr("</div>");
-
-        // Check for .obsidian folder
-        if (m_vaultValidator->hasObsidianConfig(path)) {
-            info += tr("<p style='color: #34c759; font-weight: 500;'>✓ Valid Obsidian Vault</p>");
+            info += tr("<tr><td class='label'>%1</td><td class='value'>%2 <span style='color: #86868b;'>(.obsidian, .r2mo)</span></td></tr>").arg(tr("Hidden Items")).arg(hiddenItems);
         }
         
-        // Check for .r2mo folder
+        // Check for .obsidian folder
+        if (m_vaultValidator->hasObsidianConfig(path)) {
+            info += tr("<tr><td class='label'>%1</td><td class='value status-ok'>✓ %2</td></tr>").arg(tr("Obsidian")).arg(tr("Valid Vault"));
+        }
+        
+        info += tr("</table>");
+        
+        // Check for .r2mo folder and show detailed info
         if (m_vaultValidator->hasR2moConfig(path)) {
-            info += tr("<p style='color: #007aff; font-weight: 500;'>✓ R2MO configuration detected</p>");
+            // Scan for R2MO projects
+            R2moScanner scanner;
+            QList<R2moSubProject> projects = scanner.scanVault(path);
+            
+            if (!projects.isEmpty()) {
+                // Calculate totals
+                int totalQueue = 0;
+                int totalHistorical = 0;
+                
+                for (const R2moSubProject& proj : projects) {
+                    totalQueue += proj.taskQueueCount;
+                    totalHistorical += proj.historicalTaskCount;
+                }
+                
+                // R2MO Statistics Table
+                info += tr("<table>");
+                info += tr("<tr><th colspan='2'>🔧 %1</th></tr>").arg(tr("R2MO Statistics"));
+                info += tr("<tr><td class='label'>%1</td><td class='value status-info'>✓ %2</td></tr>").arg(tr("Configuration")).arg(tr("Detected"));
+                info += tr("<tr><td class='label'>%1</td><td class='value'>%2</td></tr>").arg(tr("Total Projects")).arg(projects.size());
+                info += tr("<tr><td class='label'>%1</td><td class='value status-warning'>%2 %3</td></tr>").arg(tr("Task Queue")).arg(totalQueue).arg(tr("pending"));
+                info += tr("<tr><td class='label'>%1</td><td class='value status-ok'>%2 %3</td></tr>").arg(tr("Historical Tasks")).arg(totalHistorical).arg(tr("completed"));
+                info += tr("</table>");
+                
+                // Draw directed graph for project relationships (in Graph tab)
+                drawProjectGraph(projects);
+                
+                // Build expandable task tree (in Tasks tab)
+                buildTaskTree(projects);
+            }
         }
     } else {
-        info += tr("<p style='color: #ff3b30;'>⚠ Path does not exist</p>");
+        info += tr("<table>");
+        info += tr("<tr><th colspan='2'>⚠ %1</th></tr>").arg(tr("Warning"));
+        info += tr("<tr><td colspan='2' style='color: #ff3b30;'>%1</td></tr>").arg(tr("Path does not exist"));
+        info += tr("</table>");
     }
 
     m_previewPane->setHtml(info);
+}
+
+void MainWindow::drawProjectGraph(const QList<R2moSubProject>& projects)
+{
+    m_graphScene->clear();
+    
+    // Determine colors based on current theme
+    ThemeManager::Theme currentTheme = ThemeManager::instance()->currentTheme();
+    
+    // Text colors: dark text for light backgrounds, light text for dark backgrounds
+    QColor textColor = (currentTheme == ThemeManager::Light) ? QColor("#333333") : QColor("#f5f5f7");
+    QColor parentBgColor = (currentTheme == ThemeManager::Light) ? QColor("#e8f4fd") : QColor("#1a3a5c");
+    QColor childBgColor = (currentTheme == ThemeManager::Light) ? QColor("#e8f8e8") : QColor("#1a4a2c");
+    QColor borderColor = QColor("#007aff");
+    QColor arrowColor = QColor("#007aff");
+    
+    // Find parent project
+    const R2moSubProject* parent = nullptr;
+    QList<const R2moSubProject*> children;
+    
+    for (const R2moSubProject& proj : projects) {
+        if (proj.isParent) {
+            parent = &proj;
+        } else {
+            children.append(&proj);
+        }
+    }
+    
+    if (!parent) return;
+    
+    // Set font for text items
+    QFont textFont("MesloLGS NF", 12);
+    textFont.setWeight(QFont::DemiBold);
+    
+    // Calculate layout based on view size
+    QSize viewSize = m_graphView->viewport()->size();
+    int viewWidth = viewSize.width();
+    int viewHeight = viewSize.height();
+    
+    // Node dimensions
+    int nodeWidth = 160;
+    int nodeHeight = 60;
+    int margin = 80;
+    
+    // Calculate positions
+    int parentY = margin;
+    int childY = margin + 150;
+    
+    // Center parent horizontally
+    int parentX = viewWidth / 2;
+    
+    // Draw parent node
+    QGraphicsRectItem* parentNode = m_graphScene->addRect(
+        parentX - nodeWidth/2, parentY, nodeWidth, nodeHeight,
+        QPen(borderColor, 2), QBrush(parentBgColor));
+    
+    QGraphicsTextItem* parentText = m_graphScene->addText(parent->name, textFont);
+    parentText->setDefaultTextColor(textColor);
+    parentText->setPos(parentX - parentText->boundingRect().width()/2, parentY + 18);
+    
+    // Draw children nodes and arrows
+    int childSpacing = qMax(180, viewWidth / (children.size() + 1));
+    int startX = parentX - (children.size() - 1) * childSpacing / 2;
+    
+    for (int i = 0; i < children.size(); ++i) {
+        const R2moSubProject* child = children[i];
+        int childX = startX + i * childSpacing;
+        
+        // Draw arrow from parent to child
+        QGraphicsLineItem* line = m_graphScene->addLine(
+            parentX, parentY + nodeHeight,
+            childX, childY,
+            QPen(arrowColor, 2));
+        
+        // Draw arrowhead
+        QPolygonF arrowHead;
+        arrowHead << QPointF(childX, childY)
+                  << QPointF(childX - 10, childY - 14)
+                  << QPointF(childX + 10, childY - 14);
+        QGraphicsPolygonItem* arrow = m_graphScene->addPolygon(arrowHead, 
+            QPen(arrowColor), QBrush(arrowColor));
+        
+        // Draw child node
+        QGraphicsRectItem* childNode = m_graphScene->addRect(
+            childX - nodeWidth/2, childY, nodeWidth, nodeHeight,
+            QPen(QColor("#34c759"), 2), QBrush(childBgColor));
+        
+        QGraphicsTextItem* childText = m_graphScene->addText(child->name, textFont);
+        childText->setDefaultTextColor(textColor);
+        childText->setPos(childX - childText->boundingRect().width()/2, childY + 18);
+    }
+    
+    // Add legend with proper text color
+    QFont legendFont("MesloLGS NF", 10);
+    QGraphicsTextItem* legend = m_graphScene->addText(
+        tr("Ctrl+Scroll: Zoom | Drag: Pan | Double-click: Reset"), legendFont);
+    legend->setDefaultTextColor(QColor("#86868b"));
+    legend->setPos(10, 10);
+    
+    // Set scene rect to fill the entire view
+    m_graphScene->setSceneRect(0, 0, viewWidth, viewHeight);
+    
+    // Fit the view to show all content
+    m_graphView->fitInView(m_graphScene->sceneRect(), Qt::KeepAspectRatio);
+}
+
+void MainWindow::buildTaskTree(const QList<R2moSubProject>& projects)
+{
+    m_taskTree->clear();
+    m_taskTree->setHeaderLabel(tr("Tasks by Project"));
+    
+    R2moScanner scanner;
+    
+    // Find parent project first
+    const R2moSubProject* parent = nullptr;
+    QList<const R2moSubProject*> children;
+    
+    for (const R2moSubProject& proj : projects) {
+        if (proj.isParent) {
+            parent = &proj;
+        } else {
+            children.append(&proj);
+        }
+    }
+    
+    if (!parent) return;
+    
+    // Create parent project item as top-level
+    QTreeWidgetItem* parentItem = new QTreeWidgetItem(m_taskTree);
+    parentItem->setText(0, QString("📁 %1").arg(parent->name));
+    parentItem->setData(0, Qt::UserRole, parent->path);
+    QFont parentFont = parentItem->font(0);
+    parentFont.setBold(true);
+    parentItem->setFont(0, parentFont);
+    
+    QString parentR2moPath = parent->path + "/.r2mo";
+    
+    // Add sub-projects under parent
+    for (const R2moSubProject* child : children) {
+        QTreeWidgetItem* childItem = new QTreeWidgetItem(parentItem);
+        childItem->setText(0, QString("📂 %1").arg(child->name));
+        childItem->setData(0, Qt::UserRole, child->path);
+        
+        QString childR2moPath = child->path + "/.r2mo";
+        
+        // Task Queue for sub-project
+        QList<TaskInfo> childQueueTasks = scanner.getTaskQueueFiles(childR2moPath);
+        QTreeWidgetItem* childQueueItem = new QTreeWidgetItem(childItem);
+        childQueueItem->setText(0, tr("📋 Task Queue: %1 pending").arg(childQueueTasks.size()));
+        childQueueItem->setForeground(0, QColor("#ff9500"));
+        
+        if (!childQueueTasks.isEmpty()) {
+            for (const TaskInfo& task : childQueueTasks) {
+                QTreeWidgetItem* taskItem = new QTreeWidgetItem(childQueueItem);
+                QString displayText = task.fileName;
+                if (!task.title.isEmpty() && task.title != task.fileName) {
+                    displayText = QString("%1 - %2").arg(task.fileName, task.title);
+                }
+                taskItem->setText(0, displayText);
+                taskItem->setData(0, Qt::UserRole, task.filePath);
+                taskItem->setToolTip(0, task.modifiedTime.toString("yyyy-MM-dd hh:mm"));
+            }
+        }
+        
+        // Historical Tasks for sub-project
+        QList<TaskInfo> childHistoricalTasks = scanner.getHistoricalTasks(childR2moPath);
+        QTreeWidgetItem* childHistoryItem = new QTreeWidgetItem(childItem);
+        childHistoryItem->setText(0, tr("📜 Historical Tasks: %1 completed").arg(childHistoricalTasks.size()));
+        childHistoryItem->setForeground(0, QColor("#34c759"));
+        
+        if (!childHistoricalTasks.isEmpty()) {
+            QMap<QString, QList<TaskInfo>> tasksByDate;
+            for (const TaskInfo& task : childHistoricalTasks) {
+                QString dateKey = task.runAtTime.isValid() 
+                    ? task.runAtTime.toString("yyyy-MM-dd") 
+                    : task.modifiedTime.toString("yyyy-MM-dd");
+                tasksByDate[dateKey].append(task);
+            }
+            
+            QList<QString> sortedDates = tasksByDate.keys();
+            std::sort(sortedDates.begin(), sortedDates.end(), [](const QString& a, const QString& b) {
+                return a > b;
+            });
+            
+            for (const QString& date : sortedDates) {
+                QTreeWidgetItem* dateItem = new QTreeWidgetItem(childHistoryItem);
+                dateItem->setText(0, QString("📅 %1 (%2)").arg(date).arg(tasksByDate[date].size()));
+                dateItem->setForeground(0, QColor("#86868b"));
+                
+                for (const TaskInfo& task : tasksByDate[date]) {
+                    QTreeWidgetItem* taskItem = new QTreeWidgetItem(dateItem);
+                    taskItem->setText(0, task.title);
+                    taskItem->setData(0, Qt::UserRole, task.filePath);
+                    QString timeStr = task.runAtTime.isValid() 
+                        ? task.runAtTime.toString("yyyy-MM-dd hh:mm:ss") 
+                        : task.modifiedTime.toString("yyyy-MM-dd hh:mm");
+                    taskItem->setToolTip(0, QString("%1\n%2").arg(task.fileName, timeStr));
+                }
+            }
+        }
+        
+        // Open button for sub-project
+        QTreeWidgetItem* childOpenItem = new QTreeWidgetItem(childItem);
+        childOpenItem->setText(0, tr("🔗 Open in Obsidian"));
+        childOpenItem->setForeground(0, QColor("#007aff"));
+        childOpenItem->setData(0, Qt::UserRole, child->path);
+        
+        childItem->setExpanded(true);
+    }
+    
+    // Task Queue for parent project
+    QList<TaskInfo> queueTasks = scanner.getTaskQueueFiles(parentR2moPath);
+    QTreeWidgetItem* queueItem = new QTreeWidgetItem(parentItem);
+    queueItem->setText(0, tr("📋 Task Queue: %1 pending").arg(queueTasks.size()));
+    queueItem->setForeground(0, QColor("#ff9500"));
+    
+    if (!queueTasks.isEmpty()) {
+        for (const TaskInfo& task : queueTasks) {
+            QTreeWidgetItem* taskItem = new QTreeWidgetItem(queueItem);
+            QString displayText = task.fileName;
+            if (!task.title.isEmpty() && task.title != task.fileName) {
+                displayText = QString("%1 - %2").arg(task.fileName, task.title);
+            }
+            taskItem->setText(0, displayText);
+            taskItem->setData(0, Qt::UserRole, task.filePath);
+            taskItem->setToolTip(0, task.modifiedTime.toString("yyyy-MM-dd hh:mm"));
+        }
+    }
+    
+    // Historical Tasks for parent project
+    QList<TaskInfo> historicalTasks = scanner.getHistoricalTasks(parentR2moPath);
+    QTreeWidgetItem* historyItem = new QTreeWidgetItem(parentItem);
+    historyItem->setText(0, tr("📜 Historical Tasks: %1 completed").arg(historicalTasks.size()));
+    historyItem->setForeground(0, QColor("#34c759"));
+    
+    if (!historicalTasks.isEmpty()) {
+        QMap<QString, QList<TaskInfo>> tasksByDate;
+        for (const TaskInfo& task : historicalTasks) {
+            QString dateKey = task.runAtTime.isValid() 
+                ? task.runAtTime.toString("yyyy-MM-dd") 
+                : task.modifiedTime.toString("yyyy-MM-dd");
+            tasksByDate[dateKey].append(task);
+        }
+        
+        QList<QString> sortedDates = tasksByDate.keys();
+        std::sort(sortedDates.begin(), sortedDates.end(), [](const QString& a, const QString& b) {
+            return a > b;
+        });
+        
+        for (const QString& date : sortedDates) {
+            QTreeWidgetItem* dateItem = new QTreeWidgetItem(historyItem);
+            dateItem->setText(0, QString("📅 %1 (%2)").arg(date).arg(tasksByDate[date].size()));
+            dateItem->setForeground(0, QColor("#86868b"));
+            
+            for (const TaskInfo& task : tasksByDate[date]) {
+                QTreeWidgetItem* taskItem = new QTreeWidgetItem(dateItem);
+                taskItem->setText(0, task.title);
+                taskItem->setData(0, Qt::UserRole, task.filePath);
+                QString timeStr = task.runAtTime.isValid() 
+                    ? task.runAtTime.toString("yyyy-MM-dd hh:mm:ss") 
+                    : task.modifiedTime.toString("yyyy-MM-dd hh:mm");
+                taskItem->setToolTip(0, QString("%1\n%2").arg(task.fileName, timeStr));
+            }
+        }
+    }
+    
+    // Open button for parent project
+    QTreeWidgetItem* openItem = new QTreeWidgetItem(parentItem);
+    openItem->setText(0, tr("🔗 Open in Obsidian"));
+    openItem->setForeground(0, QColor("#007aff"));
+    openItem->setData(0, Qt::UserRole, parent->path);
+    
+    parentItem->setExpanded(true);
+}
+
+void MainWindow::onTaskItemDoubleClicked(QTreeWidgetItem* item, int column)
+{
+    Q_UNUSED(column);
+    
+    if (!item) return;
+    
+    QString path = item->data(0, Qt::UserRole).toString();
+    QString text = item->text(0);
+    
+    // Check if it's an "Open in Obsidian" item
+    if (text.contains(tr("Open in Obsidian")) && !path.isEmpty()) {
+        openVaultInObsidian(path);
+        return;
+    }
+    
+    // Check if it's a task file
+    if (path.endsWith(".md") && QFile::exists(path)) {
+        // Open the task file in default editor
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    }
 }
 
 void MainWindow::onPreviewEditClicked()
@@ -874,9 +1311,16 @@ void MainWindow::onPreviewEditClicked()
     m_previewTitleEdit->setText(m_previewTitle->text());
     m_previewTitle->hide();
     m_previewEditBtn->hide();
+    m_previewOpenBtn->hide();
     m_previewTitleEdit->show();
     m_previewTitleEdit->setFocus();
     m_previewTitleEdit->selectAll();
+}
+
+void MainWindow::onPreviewOpenClicked()
+{
+    if (m_currentPreviewPath.isEmpty()) return;
+    openVaultInObsidian(m_currentPreviewPath);
 }
 
 void MainWindow::onPreviewTitleEditFinished()
@@ -886,6 +1330,7 @@ void MainWindow::onPreviewTitleEditFinished()
     // Switch back to display mode
     m_previewTitle->show();
     m_previewEditBtn->show();
+    m_previewOpenBtn->show();
     m_previewTitleEdit->hide();
     
     if (newName.isEmpty() || m_currentPreviewPath.isEmpty()) {
@@ -953,6 +1398,7 @@ void MainWindow::retranslateUi()
     // Retranslate buttons
     m_addBtn->setText(tr("Add"));
     m_removeBtn->setText(tr("Remove"));
+    m_previewOpenBtn->setText(tr("Open"));
     
     // Retranslate placeholder
     m_previewTitle->setText(tr("Select a vault..."));
@@ -1028,4 +1474,32 @@ void MainWindow::onAbout()
                           "<li>Multi-language support (EN/ZH)</li>"
                           "</ul>"
                           "<p style='color: #86868b; margin-top: 16px;'>Built with Qt 6.10.0</p>"));
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    // Handle wheel events for graph view zoom
+    if (watched == m_graphView && event->type() == QEvent::Wheel) {
+        QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
+        
+        // Zoom with Ctrl + Wheel
+        if (wheelEvent->modifiers() & Qt::ControlModifier) {
+            const double scaleFactor = 1.15;
+            if (wheelEvent->angleDelta().y() > 0) {
+                m_graphView->scale(scaleFactor, scaleFactor);
+            } else {
+                m_graphView->scale(1.0 / scaleFactor, 1.0 / scaleFactor);
+            }
+            return true;
+        }
+    }
+    
+    // Handle double-click to reset zoom
+    if (watched == m_graphView && event->type() == QEvent::MouseButtonDblClick) {
+        m_graphView->resetTransform();
+        m_graphView->scale(1.0, 1.0);
+        return true;
+    }
+    
+    return QMainWindow::eventFilter(watched, event);
 }

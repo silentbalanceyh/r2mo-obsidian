@@ -209,5 +209,89 @@ Please set it in Settings.</source>
         <source>Language</source>
         <translation>语言</translation>
     </message>
+    <message>
+        <source>Select a vault...</source>
+        <translation>选择一个仓库...</translation>
+    </message>
+    <message>
+        <source>Open in Obsidian</source>
+        <translation>在 Obsidian 中打开</translation>
+    </message>
+    <message>
+        <source>📊 R2MO Statistics</source>
+        <translation>📊 R2MO 统计</translation>
+    </message>
+    <message>
+        <source>Total Projects:</source>
+        <translation>项目总数:</translation>
+    </message>
+    <message>
+        <source>Task Queue:</source>
+        <translation>任务队列:</translation>
+    </message>
+    <message>
+        <source>pending</source>
+        <translation>待处理</translation>
+    </message>
+    <message>
+        <source>Historical Tasks:</source>
+        <translation>历史任务:</translation>
+    </message>
+    <message>
+        <source>completed</source>
+        <translation>已完成</translation>
+    </message>
+    <message>
+        <source>🔗 Project Relationships</source>
+        <translation>🔗 项目关系</translation>
+    </message>
+    <message>
+        <source>(Parent)</source>
+        <translation>(父项目)</translation>
+    </message>
+    <message>
+        <source>(Sub-project)</source>
+        <translation>(子项目)</translation>
+    </message>
+    <message>
+        <source>Queue:</source>
+        <translation>队列:</translation>
+    </message>
+    <message>
+        <source>History:</source>
+        <translation>历史:</translation>
+    </message>
+    <message>
+        <source>Tasks</source>
+        <translation>任务</translation>
+    </message>
+    <message>
+        <source>Tasks by Project</source>
+        <translation>按项目查看任务</translation>
+    </message>
+    <message>
+        <source>📋 Queue: %1 pending</source>
+        <translation>📋 队列: %1 待处理</translation>
+    </message>
+    <message>
+        <source>📜 History: %1 completed</source>
+        <translation>📜 历史: %1 已完成</translation>
+    </message>
+    <message>
+        <source>📝 Recent Tasks (double-click to view)</source>
+        <translation>📝 近期任务 (双击查看)</translation>
+    </message>
+    <message>
+        <source>🔗 Open in Obsidian</source>
+        <translation>🔗 在 Obsidian 中打开</translation>
+    </message>
+    <message>
+        <source>📊 Overall Statistics</source>
+        <translation>📊 整体统计</translation>
+    </message>
+    <message>
+        <source>📁 Parent Project    📂 Sub-project</source>
+        <translation>📁 父项目    📂 子项目</translation>
+    </message>
 </context>
 </TS>

@@ -10,12 +10,17 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QLineEdit>
+#include <QTreeWidget>
+#include <QGraphicsView>
+#include <QGraphicsScene>
+#include <QTabWidget>
 #include "theme/thememanager.h"
 
 // Forward declarations
 class VaultModel;
 class SettingsManager;
 class VaultValidator;
+struct R2moSubProject;
 
 class MainWindow : public QMainWindow
 {
@@ -41,6 +46,9 @@ private slots:
     void onThemeChanged(ThemeManager::Theme theme);
     void onThemeToggle();
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     void setupMenuBar();
     void setupToolBar();
@@ -50,8 +58,12 @@ private:
     void updatePreviewPane(const QString& name, const QString& path);
     void openVaultInObsidian(const QString& vaultPath);
     void onPreviewEditClicked();
+    void onPreviewOpenClicked();
     void onPreviewTitleEditFinished();
     void onPreviewTitleReturnPressed();
+    void onTaskItemDoubleClicked(QTreeWidgetItem* item, int column);
+    void drawProjectGraph(const QList<R2moSubProject>& projects);
+    void buildTaskTree(const QList<R2moSubProject>& projects);
     void retranslateUi();
     void updateLanguageButtons();
     void updateThemeToggleIcon();
@@ -73,8 +85,16 @@ private:
     QWidget *m_previewHeader;
     QLabel *m_previewTitle;
     QPushButton *m_previewEditBtn;
+    QPushButton *m_previewOpenBtn;
     QLineEdit *m_previewTitleEdit;
     QTextEdit *m_previewPane;
+    QTabWidget *m_tabWidget;
+    QWidget *m_overviewTab;
+    QWidget *m_tasksTab;
+    QWidget *m_graphTab;
+    QGraphicsView *m_graphView;
+    QGraphicsScene *m_graphScene;
+    QTreeWidget *m_taskTree;
     QString m_currentPreviewPath;
 
     // Modules (not owned)

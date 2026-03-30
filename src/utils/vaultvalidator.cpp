@@ -24,6 +24,13 @@ bool VaultValidator::hasObsidianConfig(const QString& path) const
 bool VaultValidator::hasR2moConfig(const QString& path) const
 {
     QDir dir(path);
+    
+    // Check if path itself is .r2mo directory
+    if (dir.dirName() == ".r2mo") {
+        return true;
+    }
+    
+    // Check if .r2mo exists inside the path
     return dir.exists(".r2mo");
 }
 

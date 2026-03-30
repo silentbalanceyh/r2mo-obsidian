@@ -135,5 +135,85 @@
         <source>Path does not exist</source>
         <translation>Path does not exist</translation>
     </message>
+    <message>
+        <source>Select a vault...</source>
+        <translation>Select a vault...</translation>
+    </message>
+    <message>
+        <source>📊 R2MO Statistics</source>
+        <translation>📊 R2MO Statistics</translation>
+    </message>
+    <message>
+        <source>Total Projects:</source>
+        <translation>Total Projects:</translation>
+    </message>
+    <message>
+        <source>Task Queue:</source>
+        <translation>Task Queue:</translation>
+    </message>
+    <message>
+        <source>pending</source>
+        <translation>pending</translation>
+    </message>
+    <message>
+        <source>Historical Tasks:</source>
+        <translation>Historical Tasks:</translation>
+    </message>
+    <message>
+        <source>completed</source>
+        <translation>completed</translation>
+    </message>
+    <message>
+        <source>🔗 Project Relationships</source>
+        <translation>🔗 Project Relationships</translation>
+    </message>
+    <message>
+        <source>(Parent)</source>
+        <translation>(Parent)</translation>
+    </message>
+    <message>
+        <source>(Sub-project)</source>
+        <translation>(Sub-project)</translation>
+    </message>
+    <message>
+        <source>Queue:</source>
+        <translation>Queue:</translation>
+    </message>
+    <message>
+        <source>History:</source>
+        <translation>History:</translation>
+    </message>
+    <message>
+        <source>Tasks</source>
+        <translation>Tasks</translation>
+    </message>
+    <message>
+        <source>Tasks by Project</source>
+        <translation>Tasks by Project</translation>
+    </message>
+    <message>
+        <source>📋 Queue: %1 pending</source>
+        <translation>📋 Queue: %1 pending</translation>
+    </message>
+    <message>
+        <source>📜 History: %1 completed</source>
+        <translation>📜 History: %1 completed</translation>
+    </message>
+    <message>
+        <source>📝 Recent Tasks (double-click to view)</source>
+        <translation>📝 Recent Tasks (double-click to view)</translation>
+    </message>
+    <message>
+        <source>🔗 Open in Obsidian</source>
+        <translation>🔗 Open in Obsidian</translation>
+    </message>
+    <message>
+        <source>📊 Overall Statistics</source>
+        <translation>📊 Overall Statistics</translation>
+    </message>
+    <message>
+        <source>📁 Parent Project    📂 Sub-project</source>
+        <translation>📁 Parent Project    📂 Sub-project</translation>
+    </message>
 </context>
 </TS>

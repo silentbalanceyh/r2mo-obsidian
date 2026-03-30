@@ -42,6 +42,8 @@ set(SOURCES
     src/utils/vaultvalidator.h
     src/utils/obsidianconfigreader.cpp
     src/utils/obsidianconfigreader.h
+    src/utils/r2moscanner.cpp
+    src/utils/r2moscanner.h
 )
 
 # Font resources
