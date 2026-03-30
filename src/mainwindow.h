@@ -45,7 +45,6 @@ private slots:
     void onLanguageButtonClicked(int id);
     void onThemeChanged(ThemeManager::Theme theme);
     void onThemeToggle();
-
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 

@@ -14,9 +14,12 @@ title: 新需求
   - Tab styling: left-aligned, trapezoid shape (no rounded corners), active tab background matches page
   - Task queue: sorted by file number (task-001, task-002, etc.)
   - Historical tasks: sorted by runAt time (fallback to modified time)
-  - Graph: removed icons from legend, added grid background, zoom (Ctrl+Wheel), pan (drag), reset (double-click)
-  - Task tree: sub-projects now display under parent project with hierarchy lines
-  - Branch indicators: added expand/collapse triangle icons (▶/▼) for both light and dark themes
-  - Graph tab: canvas fills entire view, content centered based on viewport size
-  - Overview tab: HTML table fills entire width (table-layout: fixed, 50/50 column split)
-  - Updated mainwindow.cpp, mainwindow.h, r2moscanner.cpp, thememanager.cpp
+  - Graph: ruler background with tick marks and grid, zoom (Ctrl+Wheel), pan (drag), reset (double-click)
+  - Task tree: sub-projects display under parent project with expand/collapse icons (⊕/⊖ style)
+  - Overview tab: 
+    - Red path highlight with larger font (15px, bold)
+    - Tables fill entire width with 50/50 column split
+    - 8px spacing between path bar and tables
+    - Increased padding (16px 24px) for better readability
+  - LSP configuration: added .clangd and compile_commands.json symlink
+  - Updated mainwindow.cpp, mainwindow.h, r2moscanner.cpp, thememanager.cpp, CLAUDE.md

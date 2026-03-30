@@ -36,6 +36,7 @@
 #include <QButtonGroup>
 #include <QTabWidget>
 #include <QWheelEvent>
+#include <QHeaderView>
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
@@ -391,13 +392,14 @@ void MainWindow::setupCentralWidget()
     // Tab 1: Overview (概览)
     m_overviewTab = new QWidget;
     QVBoxLayout *overviewLayout = new QVBoxLayout(m_overviewTab);
-    overviewLayout->setContentsMargins(0, 0, 0, 0);
-    overviewLayout->setSpacing(0);
+    overviewLayout->setContentsMargins(8, 8, 8, 8);
+    overviewLayout->setSpacing(8);
     
     m_previewPane = new QTextEdit;
     m_previewPane->setReadOnly(true);
     m_previewPane->setPlaceholderText(tr("Select a vault to view details..."));
-    m_previewPane->setStyleSheet("QTextEdit { border: none; background: white; }");
+    m_previewPane->setFrameShape(QFrame::NoFrame);
+    m_previewPane->setStyleSheet("QTextEdit { border: none; background: white; padding: 0px; margin: 0px; }");
 
     overviewLayout->addWidget(m_previewPane, 1);
     m_tabWidget->addTab(m_overviewTab, tr("概览"));
@@ -410,7 +412,9 @@ void MainWindow::setupCentralWidget()
     
     m_taskTree = new QTreeWidget;
     m_taskTree->setHeaderLabel(tr("Tasks"));
-    m_taskTree->setStyleSheet("QTreeWidget { border: none; background: white; } QTreeWidget::item { padding: 4px; } QTreeWidget::item:selected { background: #007aff; color: white; }");
+    m_taskTree->setIndentation(22);
+    m_taskTree->setUniformRowHeights(false);
+    m_taskTree->setStyleSheet("QTreeWidget { border: none; background: white; } QTreeWidget::item { padding: 6px 4px; } QTreeWidget::item:selected { background: #007aff; color: white; }");
     m_taskTree->setAlternatingRowColors(false);
     m_taskTree->setRootIsDecorated(true);  // Show guide lines
     m_taskTree->setItemsExpandable(true);   // Allow expand/collapse
@@ -907,14 +911,12 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
     // Clear previous content
     m_graphScene->clear();
     m_taskTree->clear();
-    
+
     QString info;
-    
-    // Table style - full width
     info += tr("<style>"
         "body { margin: 0; padding: 0; }"
-        "table { width: 100%; border-collapse: collapse; margin-bottom: 0; table-layout: fixed; }"
-        "th { text-align: left; padding: 14px 20px; background: #f5f5f7; font-weight: 600; border-bottom: 2px solid #e0e0e0; }"
+        "table { width: 100%; border-collapse: collapse; margin: 0 0 8px 0; table-layout: fixed; }"
+        "th { text-align: left; padding: 14px 20px; background: #f5f5f7; font-weight: 600; border-bottom: 2px solid #e0e0e0; font-size: 15px; }"
         "td { padding: 14px 20px; border-bottom: 1px solid #e8e8ed; }"
         "tr:hover { background: #fafafa; }"
         ".label { color: #86868b; width: 50%; }"
@@ -922,10 +924,8 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
         ".status-ok { color: #34c759; }"
         ".status-info { color: #007aff; }"
         ".status-warning { color: #ff9500; }"
-        ".path-bar { color: #86868b; font-size: 12px; padding: 14px 20px; background: #f5f5f7; border-bottom: 1px solid #e0e0e0; }"
+        ".path-bar { color: #ff3b30; font-size: 17px; padding: 0 0 8px 0; margin: 0 0 8px 0; }"
         "</style>");
-    
-    // Path info
     info += tr("<div class='path-bar'>%1</div>").arg(path);
 
     QDir vaultDir(path);
@@ -950,7 +950,6 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
             }
         }
 
-        // Vault Statistics Table
         info += tr("<table>");
         info += tr("<tr><th colspan='2'>📊 %1</th></tr>").arg(tr("Vault Statistics"));
         info += tr("<tr><td class='label'>%1</td><td class='value'>%2</td></tr>").arg(tr("Files")).arg(files);
@@ -958,12 +957,9 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
         if (hiddenItems > 0) {
             info += tr("<tr><td class='label'>%1</td><td class='value'>%2 <span style='color: #86868b;'>(.obsidian, .r2mo)</span></td></tr>").arg(tr("Hidden Items")).arg(hiddenItems);
         }
-        
-        // Check for .obsidian folder
         if (m_vaultValidator->hasObsidianConfig(path)) {
             info += tr("<tr><td class='label'>%1</td><td class='value status-ok'>✓ %2</td></tr>").arg(tr("Obsidian")).arg(tr("Valid Vault"));
         }
-        
         info += tr("</table>");
         
         // Check for .r2mo folder and show detailed info
@@ -982,7 +978,6 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
                     totalHistorical += proj.historicalTaskCount;
                 }
                 
-                // R2MO Statistics Table
                 info += tr("<table>");
                 info += tr("<tr><th colspan='2'>🔧 %1</th></tr>").arg(tr("R2MO Statistics"));
                 info += tr("<tr><td class='label'>%1</td><td class='value status-info'>✓ %2</td></tr>").arg(tr("Configuration")).arg(tr("Detected"));
@@ -1015,8 +1010,11 @@ void MainWindow::drawProjectGraph(const QList<R2moSubProject>& projects)
     // Determine colors based on current theme
     ThemeManager::Theme currentTheme = ThemeManager::instance()->currentTheme();
     
-    // Text colors: dark text for light backgrounds, light text for dark backgrounds
+    // Colors for theme
     QColor textColor = (currentTheme == ThemeManager::Light) ? QColor("#333333") : QColor("#f5f5f7");
+    QColor rulerBgColor = (currentTheme == ThemeManager::Light) ? QColor("#f5f5f7") : QColor("#3a3a3c");
+    QColor rulerTextColor = (currentTheme == ThemeManager::Light) ? QColor("#86868b") : QColor("#98989d");
+    QColor gridColor = (currentTheme == ThemeManager::Light) ? QColor("#e8e8ed") : QColor("#48484a");
     QColor parentBgColor = (currentTheme == ThemeManager::Light) ? QColor("#e8f4fd") : QColor("#1a3a5c");
     QColor childBgColor = (currentTheme == ThemeManager::Light) ? QColor("#e8f8e8") : QColor("#1a4a2c");
     QColor borderColor = QColor("#007aff");
@@ -1036,26 +1034,43 @@ void MainWindow::drawProjectGraph(const QList<R2moSubProject>& projects)
     
     if (!parent) return;
     
+    // Use a large infinite-style scene and draw grid across it
+    QSize viewSize = m_graphView->viewport()->size();
+    int viewWidth = qMax(viewSize.width(), 2400);
+    int viewHeight = qMax(viewSize.height(), 1800);
+    
+    // Full-page grid background - starts from (0,0) to fill entire view
+    int majorTickInterval = 100;
+    int minorTickInterval = 20;
+    QPen minorGridPen(gridColor, 0.35, Qt::DotLine);
+    QPen majorGridPen(gridColor.darker(115), 0.7, Qt::DashLine);
+    for (int x = 0; x <= viewWidth; x += minorTickInterval) {
+        m_graphScene->addLine(x, 0, x, viewHeight, ((x % majorTickInterval) == 0) ? majorGridPen : minorGridPen);
+    }
+    for (int y = 0; y <= viewHeight; y += minorTickInterval) {
+        m_graphScene->addLine(0, y, viewWidth, y, ((y % majorTickInterval) == 0) ? majorGridPen : minorGridPen);
+    }
+    
     // Set font for text items
     QFont textFont("MesloLGS NF", 12);
     textFont.setWeight(QFont::DemiBold);
     
-    // Calculate layout based on view size
-    QSize viewSize = m_graphView->viewport()->size();
-    int viewWidth = viewSize.width();
-    int viewHeight = viewSize.height();
-    
-    // Node dimensions
+    // Node dimensions - reduce margins to use more space
     int nodeWidth = 160;
     int nodeHeight = 60;
-    int margin = 80;
+    int topMargin = 40;
+    int leftMargin = 40;
     
-    // Calculate positions
-    int parentY = margin;
-    int childY = margin + 150;
+    // Calculate positions - start from top-left with minimal margins
+    int parentY = topMargin;
+    int childY = topMargin + 150;
     
-    // Center parent horizontally
-    int parentX = viewWidth / 2;
+    // Place content near current visible region center while keeping large canvas
+    QRectF visibleSceneRect = m_graphView->mapToScene(m_graphView->viewport()->rect()).boundingRect();
+    int parentX = static_cast<int>(visibleSceneRect.center().x());
+    if (parentX < viewWidth / 4 || parentX > (viewWidth * 3) / 4) {
+        parentX = viewWidth / 2;
+    }
     
     // Draw parent node
     QGraphicsRectItem* parentNode = m_graphScene->addRect(
@@ -1067,7 +1082,8 @@ void MainWindow::drawProjectGraph(const QList<R2moSubProject>& projects)
     parentText->setPos(parentX - parentText->boundingRect().width()/2, parentY + 18);
     
     // Draw children nodes and arrows
-    int childSpacing = qMax(180, viewWidth / (children.size() + 1));
+    int availableWidth = viewWidth - 2 * leftMargin;
+    int childSpacing = qMax(180, availableWidth / (children.size() + 1));
     int startX = parentX - (children.size() - 1) * childSpacing / 2;
     
     for (int i = 0; i < children.size(); ++i) {
@@ -1102,14 +1118,11 @@ void MainWindow::drawProjectGraph(const QList<R2moSubProject>& projects)
     QFont legendFont("MesloLGS NF", 10);
     QGraphicsTextItem* legend = m_graphScene->addText(
         tr("Ctrl+Scroll: Zoom | Drag: Pan | Double-click: Reset"), legendFont);
-    legend->setDefaultTextColor(QColor("#86868b"));
-    legend->setPos(10, 10);
+    legend->setDefaultTextColor(rulerTextColor);
+    legend->setPos(12, 8);
     
-    // Set scene rect to fill the entire view
+    // Large scene rect for infinite-style expansion
     m_graphScene->setSceneRect(0, 0, viewWidth, viewHeight);
-    
-    // Fit the view to show all content
-    m_graphView->fitInView(m_graphScene->sceneRect(), Qt::KeepAspectRatio);
 }
 
 void MainWindow::buildTaskTree(const QList<R2moSubProject>& projects)
@@ -1133,7 +1146,7 @@ void MainWindow::buildTaskTree(const QList<R2moSubProject>& projects)
     
     if (!parent) return;
     
-    // Create parent project item as top-level
+    // Create parent project item as top-level - use folder icon only, no triangle
     QTreeWidgetItem* parentItem = new QTreeWidgetItem(m_taskTree);
     parentItem->setText(0, QString("📁 %1").arg(parent->name));
     parentItem->setData(0, Qt::UserRole, parent->path);
@@ -1143,7 +1156,7 @@ void MainWindow::buildTaskTree(const QList<R2moSubProject>& projects)
     
     QString parentR2moPath = parent->path + "/.r2mo";
     
-    // Add sub-projects under parent
+    // Add sub-projects under parent - use folder icon only, no triangle
     for (const R2moSubProject* child : children) {
         QTreeWidgetItem* childItem = new QTreeWidgetItem(parentItem);
         childItem->setText(0, QString("📂 %1").arg(child->name));
@@ -1278,6 +1291,7 @@ void MainWindow::buildTaskTree(const QList<R2moSubProject>& projects)
     openItem->setForeground(0, QColor("#007aff"));
     openItem->setData(0, Qt::UserRole, parent->path);
     
+    // Only expand the parent project node, not all nodes
     parentItem->setExpanded(true);
 }
 

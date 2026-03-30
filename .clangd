@@ -1,0 +1,12 @@
+CompileFlags:
+  CompilationDatabase: build
+  Add:
+    - "-I/Users/lang/Qt/6.10.0/macos/include"
+    - "-I/Users/lang/Qt/6.10.0/macos/lib/QtCore.framework/Headers"
+    - "-I/Users/lang/Qt/6.10.0/macos/lib/QtGui.framework/Headers"
+    - "-I/Users/lang/Qt/6.10.0/macos/lib/QtWidgets.framework/Headers"
+    - "-F/Users/lang/Qt/6.10.0/macos/lib"
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
