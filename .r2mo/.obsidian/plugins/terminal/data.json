@@ -55,8 +55,8 @@
         "SIGTERM"
       ],
       "terminalOptions": {
-        "fontFamily": "\"MesloLGS NF\", monospace",
-        "documentOverride": null
+        "documentOverride": null,
+        "fontFamily": "\"MesloLGS NF\", monospace"
       },
       "type": "integrated",
       "useWin32Conhost": true
@@ -72,8 +72,8 @@
         "SIGTERM"
       ],
       "terminalOptions": {
-        "fontFamily": "\"MesloLGS NF\", monospace",
-        "documentOverride": null
+        "documentOverride": null,
+        "fontFamily": "\"MesloLGS NF\", monospace"
       },
       "type": "developerConsole"
     },

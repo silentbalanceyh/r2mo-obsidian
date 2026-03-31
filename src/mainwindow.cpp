@@ -966,32 +966,42 @@ void MainWindow::onVaultItemChanged(QListWidgetItem *item)
 
 void MainWindow::openVaultInObsidian(const QString& vaultPath)
 {
-    // Core logic: Only open the .r2mo directory
-    // Must have .r2mo/.obsidian to be valid
-    
+    // Open priority:
+    // 1) If .r2mo/.obsidian exists -> open .r2mo
+    // 2) Otherwise, if .obsidian exists in project root -> open project root
+
     QDir dir(vaultPath);
-    QString r2moPath;
+    QString openPath;
     
-    // Determine .r2mo path
+    // Case A: input path itself is .r2mo directory
     if (vaultPath.endsWith("/.r2mo") || vaultPath.endsWith("\\.r2mo")) {
-        r2moPath = vaultPath;
+        QDir r2moDir(vaultPath);
+        if (r2moDir.exists(".obsidian")) {
+            openPath = vaultPath;
+        }
     } else {
-        r2moPath = dir.filePath(".r2mo");
+        // First priority: .r2mo/.obsidian
+        QString r2moPath = dir.filePath(".r2mo");
+        QDir r2moDir(r2moPath);
+        if (r2moDir.exists(".obsidian")) {
+            openPath = r2moPath;
+        } else if (dir.exists(".obsidian")) {
+            // Fallback: project root .obsidian
+            openPath = vaultPath;
+        }
     }
     
-    // Verify .r2mo/.obsidian exists
-    QDir r2moDir(r2moPath);
-    if (!r2moDir.exists(".obsidian")) {
+    if (openPath.isEmpty()) {
         QMessageBox::warning(this, tr("Warning"), 
-            tr("Not a valid R2MO vault.\n\nPath: %1\n\nRequired: .r2mo/.obsidian directory").arg(vaultPath));
+            tr("Not a valid Obsidian vault.\n\nPath: %1\n\nRequired: .r2mo/.obsidian or .obsidian directory").arg(vaultPath));
         return;
     }
     
     // Ensure vault is registered in Obsidian config
-    ObsidianVaultInfo vaultInfo = ObsidianConfigReader::instance().getVaultByPath(r2moPath);
+    ObsidianVaultInfo vaultInfo = ObsidianConfigReader::instance().getVaultByPath(openPath);
     
     if (vaultInfo.id.isEmpty()) {
-        QString registeredId = ObsidianConfigReader::instance().registerVault(r2moPath);
+        QString registeredId = ObsidianConfigReader::instance().registerVault(openPath);
         if (registeredId.isEmpty()) {
             QMessageBox::warning(this, tr("Warning"), 
                 tr("Failed to register vault to Obsidian configuration."));
@@ -1000,13 +1010,13 @@ void MainWindow::openVaultInObsidian(const QString& vaultPath)
     }
     
     // Open vault via URL scheme
-    QString encodedPath = QUrl::toPercentEncoding(r2moPath);
+    QString encodedPath = QUrl::toPercentEncoding(openPath);
     QString obsidianUrl = QString("obsidian://open?path=%1").arg(encodedPath);
     
     QProcess process;
     process.startDetached("open", QStringList{obsidianUrl});
     
-    statusBar()->showMessage(tr("Opening vault: %1").arg(r2moPath), 3000);
+    statusBar()->showMessage(tr("Opening vault: %1").arg(openPath), 3000);
 }
 
 void MainWindow::onSettings()
