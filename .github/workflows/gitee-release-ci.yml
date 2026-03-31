@@ -19,12 +19,23 @@ jobs:
           - label: macos-arm64
             runs_on: macos-14
             archive: ObsidianManager-macos-arm64.zip
+            cmake_args: -DCMAKE_OSX_ARCHITECTURES=arm64
+          - label: macos-x64
+            runs_on: macos-14
+            archive: ObsidianManager-macos-x64.zip
+            cmake_args: -DCMAKE_OSX_ARCHITECTURES=x86_64
           - label: linux-x64
             runs_on: ubuntu-latest
             archive: ObsidianManager-linux-x64.tar.gz
+            cmake_args:
+          - label: linux-arm64
+            runs_on: ubuntu-24.04-arm
+            archive: ObsidianManager-linux-arm64.tar.gz
+            cmake_args:
           - label: windows-x64
             runs_on: windows-latest
             archive: ObsidianManager-windows-x64.zip
+            cmake_args:
 
     steps:
       - name: Checkout
@@ -38,12 +49,12 @@ jobs:
 
       - name: Configure (Unix)
         if: runner.os != 'Windows'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TRANSLATIONS=OFF
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TRANSLATIONS=OFF ${{ matrix.cmake_args }}
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TRANSLATIONS=OFF
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TRANSLATIONS=OFF ${{ matrix.cmake_args }}
 
       - name: Build (Unix)
         if: runner.os != 'Windows'
@@ -128,9 +139,12 @@ jobs:
           for f in dist/*; do
             [ -f "$f" ] || continue
             n=$(basename "$f")
-            curl -fsS -X POST "${API}/releases/${RELEASE_ID}/attach_files" \
+            if curl -fsS -X POST "${API}/releases/${RELEASE_ID}/attach_files" \
               -F "access_token=${GITEE_TOKEN}" \
               -F "name=${n}" \
-              -F "file=@${f}" >/dev/null
-            echo "Uploaded ${n}"
+              -F "file=@${f}" >/dev/null; then
+              echo "Uploaded ${n}"
+            else
+              echo "Skip/exists/fail: ${n}"
+            fi
           done
