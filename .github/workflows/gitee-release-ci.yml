@@ -19,9 +19,6 @@ jobs:
           - label: macos-arm64
             runs_on: macos-14
             archive: ObsidianManager-macos-arm64.zip
-          - label: macos-x64
-            runs_on: macos-13
-            archive: ObsidianManager-macos-x64.zip
           - label: linux-x64
             runs_on: ubuntu-latest
             archive: ObsidianManager-linux-x64.tar.gz
@@ -37,7 +34,6 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
-          modules: 'qttools'
           cache: true
 
       - name: Configure (Unix)
