@@ -12,7 +12,13 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
     set(CMAKE_PREFIX_PATH "/Users/lang/Qt/6.10.0/macos")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql LinguistTools)
+option(BUILD_TRANSLATIONS "Build Qt translation files" ON)
+
+if(BUILD_TRANSLATIONS)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql LinguistTools)
+else()
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql)
+endif()
 
 # Source files - Modular structure
 set(SOURCES
@@ -59,8 +65,10 @@ set(TS_FILES
     translations/obsidianmanager_en_US.ts
 )
 
-# Generate .qm files from .ts files
-qt_add_translations(ObsidianManager TS_FILES ${TS_FILES})
+if(BUILD_TRANSLATIONS)
+    # Generate .qm files from .ts files
+    qt_add_translations(ObsidianManager TS_FILES ${TS_FILES})
+endif()
 
 qt_add_executable(ObsidianManager ${SOURCES} ${FONT_RESOURCES})
 

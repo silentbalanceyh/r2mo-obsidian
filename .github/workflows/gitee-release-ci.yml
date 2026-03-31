@@ -42,12 +42,12 @@ jobs:
 
       - name: Configure (Unix)
         if: runner.os != 'Windows'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TRANSLATIONS=OFF
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TRANSLATIONS=OFF
 
       - name: Build (Unix)
         if: runner.os != 'Windows'
