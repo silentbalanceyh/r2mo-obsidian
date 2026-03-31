@@ -1,6 +1,7 @@
 CompileFlags:
   CompilationDatabase: build
   Add:
+    - "-std=c++17"
     - "-I/Users/lang/Qt/6.10.0/macos/include"
     - "-I/Users/lang/Qt/6.10.0/macos/lib/QtCore.framework/Headers"
     - "-I/Users/lang/Qt/6.10.0/macos/lib/QtGui.framework/Headers"

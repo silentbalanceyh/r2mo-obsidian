@@ -1,4 +1,72 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "mylocal/glm-5"
+  "model": "mylocal/glm-5",
+  "provider": {
+    "mylocal": {
+      "name": "My Local",
+      "npm": "@ai-sdk/openai-compatible",
+      "models": {
+        "glm-5": {
+          "name": "GLM 5"
+        }
+      },
+      "options": {
+        "baseURL": "http://127.0.0.1:1231/v1"
+      }
+    },
+    "provider-auth-zai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Z.AI",
+      "options": {
+        "baseURL": "https://api.z.ai/api/coding/v1",
+        "apiKey": "8aa75402df2d41aeae6531e722fdfb68.AusrjCvqJiR3JUt3"
+      },
+      "models": {
+        "glm-5": {
+          "name": "GLM-5"
+        },
+        "glm-4.7": {
+          "name": "GLM-4.7"
+        },
+        "glm-4.6": {
+          "name": "GLM-4.6"
+        },
+        "glm-4.5": {
+          "name": "GLM-4.5"
+        }
+      }
+    },
+    "formal_tech": {
+      "name": "FORMAL-TECH",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://modelgw.formal-tech.group"
+      },
+      "models": {
+        "Qwen3-Coder-Next-FP8": {
+          "name": "Qwen3 Coder"
+        }
+      }
+    }
+  },
+  "agent": {
+    "orchestrator": {
+      "model": "mylocal/glm-5"
+    },
+    "oracle": {
+      "model": "mylocal/glm-5"
+    },
+    "librarian": {
+      "model": "mylocal/glm-5"
+    },
+    "explorer": {
+      "model": "mylocal/glm-5"
+    },
+    "designer": {
+      "model": "mylocal/glm-5"
+    },
+    "fixer": {
+      "model": "mylocal/glm-5"
+    }
+  }
 }

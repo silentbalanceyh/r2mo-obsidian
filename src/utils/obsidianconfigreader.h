@@ -23,12 +23,24 @@ public:
     // Get all vaults from Obsidian config
     QList<ObsidianVaultInfo> getObsidianVaults() const;
     
+    // Get vault info by path
+    ObsidianVaultInfo getVaultByPath(const QString& path) const;
+    
     // Get the path to Obsidian config file
     QString getConfigPath() const;
     
     // Check if Obsidian config exists
     bool hasObsidianConfig() const;
     
+    // Register vault to Obsidian config and return vault ID
+    QString registerVault(const QString& path);
+    
+    // Generate 16-character hex vault ID
+    QString generateVaultId();
+    
+    // Check if Obsidian process is running
+    bool isObsidianRunning() const;
+
 private:
     ObsidianConfigReader() = default;
     ~ObsidianConfigReader() = default;

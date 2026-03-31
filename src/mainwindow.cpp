@@ -5,6 +5,7 @@
 #include "utils/vaultvalidator.h"
 #include "utils/obsidianconfigreader.h"
 #include "utils/r2moscanner.h"
+#include "utils/aitoolscanner.h"
 #include "i18n/translationmanager.h"
 
 #include <QMenuBar>
@@ -29,6 +30,7 @@
 #include <QGraphicsPolygonItem>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QThread>
 #include <QGraphicsDropShadowEffect>
 #include <QFileInfo>
 #include <QDir>
@@ -38,6 +40,7 @@
 #include <QWheelEvent>
 #include <QHeaderView>
 #include <QSpacerItem>
+#include <QStatusBar>
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
@@ -75,6 +78,9 @@ MainWindow::MainWindow(QWidget *parent)
     , m_graphView(nullptr)
     , m_graphScene(nullptr)
     , m_taskTree(nullptr)
+    , m_aiToolsTab(nullptr)
+    , m_aiToolsEmptyLabel(nullptr)
+    , m_aiToolsTree(nullptr)
     , m_vaultModel(nullptr)
     , m_settingsManager(nullptr)
     , m_vaultValidator(nullptr)
@@ -419,7 +425,7 @@ void MainWindow::setupCentralWidget()
 
     m_overviewPathLabel = new QLabel;
     m_overviewPathLabel->setWordWrap(true);
-    m_overviewPathLabel->setStyleSheet("QLabel { color: #ff3b30; font-size: 17px; background: transparent; }");
+    m_overviewPathLabel->setStyleSheet("QLabel { color: #ff3b30; font-size: 16px; background: transparent; }");
     overviewContentLayout->addWidget(m_overviewPathLabel);
 
     m_vaultStatsCard = new QFrame;
@@ -506,6 +512,32 @@ void MainWindow::setupCentralWidget()
     
     graphLayout->addWidget(m_graphView, 1);
     m_tabWidget->addTab(m_graphTab, tr("结构图"));
+    
+    // Tab 4: AI Tools (AI工具)
+    m_aiToolsTab = new QWidget;
+    QVBoxLayout *aiToolsLayout = new QVBoxLayout(m_aiToolsTab);
+    aiToolsLayout->setContentsMargins(0, 0, 0, 0);
+    aiToolsLayout->setSpacing(0);
+    
+    m_aiToolsEmptyLabel = new QLabel(tr("Select a vault with AI tool configurations..."));
+    m_aiToolsEmptyLabel->setAlignment(Qt::AlignCenter);
+    m_aiToolsEmptyLabel->setWordWrap(true);
+    m_aiToolsEmptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 24px; }");
+    aiToolsLayout->addWidget(m_aiToolsEmptyLabel, 1);
+    
+    m_aiToolsTree = new QTreeWidget;
+    m_aiToolsTree->setHeaderLabel(tr("AI Tools"));
+    m_aiToolsTree->setIndentation(22);
+    m_aiToolsTree->setUniformRowHeights(false);
+    m_aiToolsTree->setStyleSheet("QTreeWidget { border: none; background: white; } QTreeWidget::item { padding: 6px 4px; } QTreeWidget::item:selected { background: #007aff; color: white; }");
+    m_aiToolsTree->setAlternatingRowColors(false);
+    m_aiToolsTree->setRootIsDecorated(true);
+    m_aiToolsTree->setItemsExpandable(true);
+    m_aiToolsTree->setAnimated(true);
+    m_aiToolsTree->setVisible(false);
+    aiToolsLayout->addWidget(m_aiToolsTree, 1);
+    
+    m_tabWidget->addTab(m_aiToolsTab, tr("AI工具"));
 
     rightLayout->addWidget(m_tabWidget, 1);
 
@@ -528,6 +560,7 @@ void MainWindow::setupConnections()
     connect(m_previewTitleEdit, &QLineEdit::editingFinished, this, &MainWindow::onPreviewTitleEditFinished);
     connect(m_previewTitleEdit, &QLineEdit::returnPressed, this, &MainWindow::onPreviewTitleReturnPressed);
     connect(m_taskTree, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onTaskItemDoubleClicked);
+    connect(m_aiToolsTree, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onAIToolItemDoubleClicked);
     connect(m_vaultModel, &VaultModel::modelChanged, this, &MainWindow::updateVaultList);
     connect(TranslationManager::instance(), &TranslationManager::languageChanged, 
             this, &MainWindow::onLanguageChanged);
@@ -933,18 +966,47 @@ void MainWindow::onVaultItemChanged(QListWidgetItem *item)
 
 void MainWindow::openVaultInObsidian(const QString& vaultPath)
 {
-    QString appPath = m_settingsManager->obsidianAppPath();
-    if (appPath.isEmpty()) {
+    // Core logic: Only open the .r2mo directory
+    // Must have .r2mo/.obsidian to be valid
+    
+    QDir dir(vaultPath);
+    QString r2moPath;
+    
+    // Determine .r2mo path
+    if (vaultPath.endsWith("/.r2mo") || vaultPath.endsWith("\\.r2mo")) {
+        r2moPath = vaultPath;
+    } else {
+        r2moPath = dir.filePath(".r2mo");
+    }
+    
+    // Verify .r2mo/.obsidian exists
+    QDir r2moDir(r2moPath);
+    if (!r2moDir.exists(".obsidian")) {
         QMessageBox::warning(this, tr("Warning"), 
-            tr("Obsidian app path not configured.\nPlease set it in Settings."));
+            tr("Not a valid R2MO vault.\n\nPath: %1\n\nRequired: .r2mo/.obsidian directory").arg(vaultPath));
         return;
     }
-
-    // macOS: open Obsidian with vault path
+    
+    // Ensure vault is registered in Obsidian config
+    ObsidianVaultInfo vaultInfo = ObsidianConfigReader::instance().getVaultByPath(r2moPath);
+    
+    if (vaultInfo.id.isEmpty()) {
+        QString registeredId = ObsidianConfigReader::instance().registerVault(r2moPath);
+        if (registeredId.isEmpty()) {
+            QMessageBox::warning(this, tr("Warning"), 
+                tr("Failed to register vault to Obsidian configuration."));
+            return;
+        }
+    }
+    
+    // Open vault via URL scheme
+    QString encodedPath = QUrl::toPercentEncoding(r2moPath);
+    QString obsidianUrl = QString("obsidian://open?path=%1").arg(encodedPath);
+    
     QProcess process;
-    QStringList args;
-    args << "-a" << appPath << vaultPath;
-    process.startDetached("open", args);
+    process.startDetached("open", QStringList{obsidianUrl});
+    
+    statusBar()->showMessage(tr("Opening vault: %1").arg(r2moPath), 3000);
 }
 
 void MainWindow::onSettings()
@@ -1046,9 +1108,13 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
         } else {
             m_r2moStatsCard->setVisible(false);
         }
+        
+        // Build AI Tools tab
+        buildAIToolsTab(path);
     } else {
         addOverviewRow(m_vaultStatsGrid, 0, tr("Warning"), tr("Path does not exist"), "#ff3b30");
         m_r2moStatsCard->setVisible(false);
+        buildAIToolsTab(QString());
     }
 }
 
@@ -1172,7 +1238,9 @@ void MainWindow::drawProjectGraph(const QList<R2moSubProject>& projects)
     
     QGraphicsTextItem* parentText = m_graphScene->addText(parent->name, textFont);
     parentText->setDefaultTextColor(textColor);
-    parentText->setPos(parentX - parentText->boundingRect().width()/2, parentY + 18);
+    qreal textHeight = parentText->boundingRect().height();
+    qreal textWidth = parentText->boundingRect().width();
+    parentText->setPos(parentX - textWidth/2, parentY + (nodeHeight - textHeight)/2);
     
     // Draw children nodes and arrows
     int availableWidth = viewWidth - 2 * leftMargin;
@@ -1204,7 +1272,9 @@ void MainWindow::drawProjectGraph(const QList<R2moSubProject>& projects)
         
         QGraphicsTextItem* childText = m_graphScene->addText(child->name, textFont);
         childText->setDefaultTextColor(textColor);
-        childText->setPos(childX - childText->boundingRect().width()/2, childY + 18);
+        qreal childTextHeight = childText->boundingRect().height();
+        qreal childTextWidth = childText->boundingRect().width();
+        childText->setPos(childX - childTextWidth/2, childY + (nodeHeight - childTextHeight)/2);
     }
     
     // Add legend with proper text color
@@ -1216,6 +1286,10 @@ void MainWindow::drawProjectGraph(const QList<R2moSubProject>& projects)
     
     // Large scene rect for infinite-style expansion
     m_graphScene->setSceneRect(0, 0, viewWidth, viewHeight);
+    
+    // Center the view on the parent node
+    QPointF centerPoint(parentX, parentY + nodeHeight / 2);
+    m_graphView->centerOn(centerPoint);
 }
 
 void MainWindow::buildTaskTree(const QList<R2moSubProject>& projects)
@@ -1406,6 +1480,20 @@ void MainWindow::onTaskItemDoubleClicked(QTreeWidgetItem* item, int column)
     // Check if it's a task file
     if (path.endsWith(".md") && QFile::exists(path)) {
         // Open the task file in default editor
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    }
+}
+
+void MainWindow::onAIToolItemDoubleClicked(QTreeWidgetItem* item, int column)
+{
+    Q_UNUSED(column);
+
+    if (!item) return;
+
+    const QString path = item->data(0, Qt::UserRole).toString();
+
+    // AI tools tree supports opening files directly when double-clicked
+    if (!path.isEmpty() && QFileInfo::exists(path) && QFileInfo(path).isFile()) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     }
 }
@@ -1609,4 +1697,164 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     }
     
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::buildAIToolsTab(const QString& vaultPath)
+{
+    m_aiToolsTree->clear();
+    
+    if (vaultPath.trimmed().isEmpty()) {
+        m_aiToolsEmptyLabel->setVisible(true);
+        m_aiToolsTree->setVisible(false);
+        return;
+    }
+    
+    // Use R2moScanner to get project structure (same as Task Tree)
+    R2moScanner scanner;
+    QList<R2moSubProject> projects = scanner.scanVault(vaultPath);
+    
+    if (projects.isEmpty()) {
+        m_aiToolsEmptyLabel->setText(tr("No R2MO projects found."));
+        m_aiToolsEmptyLabel->setVisible(true);
+        m_aiToolsTree->setVisible(false);
+        return;
+    }
+    
+    m_aiToolsEmptyLabel->setVisible(false);
+    m_aiToolsTree->setVisible(true);
+    
+    buildAIToolsTree(projects);
+}
+
+void MainWindow::buildAIToolsTree(const QList<R2moSubProject>& projects)
+{
+    m_aiToolsTree->clear();
+    m_aiToolsTree->setHeaderLabel(tr("AI Tool Configurations"));
+    
+    // Find parent and children (same pattern as buildTaskTree)
+    const R2moSubProject* parent = nullptr;
+    QList<const R2moSubProject*> children;
+    
+    for (const R2moSubProject& proj : projects) {
+        if (proj.isParent) {
+            parent = &proj;
+        } else {
+            children.append(&proj);
+        }
+    }
+    
+    if (!parent) return;
+    
+    AIToolScanner aiScanner;
+    
+    // Build parent node off-tree first, only attach when it has real AI tools
+    QTreeWidgetItem* parentItem = new QTreeWidgetItem();
+    parentItem->setText(0, QString("📁 %1").arg(parent->name));
+    QFont parentFont = parentItem->font(0);
+    parentFont.setBold(true);
+    parentItem->setFont(0, parentFont);
+    parentItem->setData(0, Qt::UserRole, parent->path);
+
+    bool parentHasAnyTools = false;
+    
+    // Add sub-projects under parent FIRST (like Task Tree)
+    for (const R2moSubProject* child : children) {
+        QTreeWidgetItem* childItem = new QTreeWidgetItem();
+        childItem->setText(0, QString("📂 %1").arg(child->name));
+        childItem->setData(0, Qt::UserRole, child->path);
+        
+        // Add AI tools for sub-project
+        QList<AIToolInfo> childTools = aiScanner.scanProject(child->path);
+        const bool childHasTools = addAIToolsToItem(childItem, childTools);
+        if (childHasTools) {
+            parentItem->addChild(childItem);
+            parentHasAnyTools = true;
+        } else {
+            delete childItem;
+        }
+    }
+    
+    // Add AI tools for parent project AFTER sub-projects
+    QList<AIToolInfo> parentTools = aiScanner.scanProject(parent->path);
+    parentHasAnyTools = addAIToolsToItem(parentItem, parentTools) || parentHasAnyTools;
+
+    if (parentHasAnyTools) {
+        m_aiToolsTree->addTopLevelItem(parentItem);
+        // Align with task tree: default expand root project node
+        parentItem->setExpanded(true);
+    } else {
+        delete parentItem;
+    }
+}
+
+bool MainWindow::addAIToolsToItem(QTreeWidgetItem* parentItem, const QList<AIToolInfo>& tools)
+{
+    if (tools.isEmpty()) {
+        return false;
+    }
+
+    bool hasAnyTools = false;
+    
+    for (const AIToolInfo& tool : tools) {
+        int totalCount = tool.sessions.count + tool.skills.count + tool.rules.count + tool.mcp.count;
+        if (totalCount == 0) {
+            continue;
+        }
+
+        QTreeWidgetItem* toolItem = new QTreeWidgetItem(parentItem);
+        
+        // Build display text with counts
+        QStringList counts;
+        if (tool.sessions.count > 0) counts << tr("%1 sessions").arg(tool.sessions.count);
+        if (tool.skills.count > 0) counts << tr("%1 skills").arg(tool.skills.count);
+        if (tool.rules.count > 0) counts << tr("%1 rules").arg(tool.rules.count);
+        if (tool.mcp.count > 0) counts << tr("%1 mcp").arg(tool.mcp.count);
+        
+        QString displayText = tool.name;
+        if (!counts.isEmpty()) {
+            displayText += QString(" (%1)").arg(counts.join(", "));
+        }
+        
+        toolItem->setText(0, displayText);
+        toolItem->setData(0, Qt::UserRole, tool.configDir);
+        
+        // Set icon if available
+        if (!tool.iconPath.isEmpty() && QFile::exists(tool.iconPath)) {
+            QPixmap pixmap(tool.iconPath);
+            if (!pixmap.isNull()) {
+                toolItem->setIcon(0, pixmap.scaled(16, 16, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            }
+        }
+        
+        // Add categories
+        auto addCategory = [&](const AIToolCategory& category, const QColor& color) {
+            if (category.count == 0) return;
+            
+            QTreeWidgetItem* catItem = new QTreeWidgetItem(toolItem);
+            catItem->setText(0, QString("%1 %2: %3").arg(category.icon, category.name).arg(category.count));
+            catItem->setForeground(0, color);
+            
+            for (const AIToolItem& item : category.items) {
+                QTreeWidgetItem* fileItem = new QTreeWidgetItem(catItem);
+                fileItem->setText(0, item.displayText);
+                fileItem->setData(0, Qt::UserRole, item.path);
+                if (item.modifiedTime.isValid()) {
+                    fileItem->setToolTip(0, QString("%1\n%2").arg(item.path, item.modifiedTime.toString("yyyy-MM-dd hh:mm")));
+                } else {
+                    fileItem->setToolTip(0, item.path);
+                }
+            }
+        };
+        
+        addCategory(tool.sessions, QColor("#007aff"));
+        addCategory(tool.skills, QColor("#ff9500"));
+        addCategory(tool.rules, QColor("#34c759"));
+        addCategory(tool.mcp, QColor("#af52de"));
+        
+        // Keep tool node collapsed by default
+        toolItem->setExpanded(false);
+        hasAnyTools = true;
+    }
+
+    return hasAnyTools;
 }

@@ -12,7 +12,7 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
     set(CMAKE_PREFIX_PATH "/Users/lang/Qt/6.10.0/macos")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql LinguistTools)
 
 # Source files - Modular structure
 set(SOURCES
@@ -44,6 +44,8 @@ set(SOURCES
     src/utils/obsidianconfigreader.h
     src/utils/r2moscanner.cpp
     src/utils/r2moscanner.h
+    src/utils/aitoolscanner.cpp
+    src/utils/aitoolscanner.h
 )
 
 # Font resources
@@ -65,6 +67,7 @@ qt_add_executable(ObsidianManager ${SOURCES} ${FONT_RESOURCES})
 target_link_libraries(ObsidianManager PRIVATE
     Qt6::Core
     Qt6::Widgets
+    Qt6::Sql
 )
 
 # Include directories

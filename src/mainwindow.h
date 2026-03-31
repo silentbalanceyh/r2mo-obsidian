@@ -16,6 +16,7 @@
 #include <QTabWidget>
 #include <QFrame>
 #include <QGridLayout>
+#include <QPixmap>
 #include "theme/thememanager.h"
 
 // Forward declarations
@@ -23,6 +24,7 @@ class VaultModel;
 class SettingsManager;
 class VaultValidator;
 struct R2moSubProject;
+struct AIToolInfo;
 
 class MainWindow : public QMainWindow
 {
@@ -63,12 +65,16 @@ private:
     void onPreviewTitleEditFinished();
     void onPreviewTitleReturnPressed();
     void onTaskItemDoubleClicked(QTreeWidgetItem* item, int column);
+    void onAIToolItemDoubleClicked(QTreeWidgetItem* item, int column);
     void drawProjectGraph(const QList<R2moSubProject>& projects);
     void buildTaskTree(const QList<R2moSubProject>& projects);
     void setOverviewEmptyState(bool empty);
     void clearOverviewGrid(QGridLayout *layout);
     void addOverviewRow(QGridLayout *layout, int row, const QString& label, const QString& value,
                         const QString& valueColor = QString(), const QString& suffixHtml = QString());
+    void buildAIToolsTab(const QString& vaultPath);
+    void buildAIToolsTree(const QList<R2moSubProject>& projects);
+    bool addAIToolsToItem(QTreeWidgetItem* parentItem, const QList<AIToolInfo>& tools);
     void retranslateUi();
     void updateLanguageButtons();
     void updateThemeToggleIcon();
@@ -110,6 +116,9 @@ private:
     QGraphicsView *m_graphView;
     QGraphicsScene *m_graphScene;
     QTreeWidget *m_taskTree;
+    QWidget *m_aiToolsTab;
+    QLabel *m_aiToolsEmptyLabel;
+    QTreeWidget *m_aiToolsTree;
     QString m_currentPreviewPath;
 
     // Modules (not owned)
