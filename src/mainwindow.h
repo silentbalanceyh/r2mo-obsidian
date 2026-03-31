@@ -14,6 +14,8 @@
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QTabWidget>
+#include <QFrame>
+#include <QGridLayout>
 #include "theme/thememanager.h"
 
 // Forward declarations
@@ -63,6 +65,10 @@ private:
     void onTaskItemDoubleClicked(QTreeWidgetItem* item, int column);
     void drawProjectGraph(const QList<R2moSubProject>& projects);
     void buildTaskTree(const QList<R2moSubProject>& projects);
+    void setOverviewEmptyState(bool empty);
+    void clearOverviewGrid(QGridLayout *layout);
+    void addOverviewRow(QGridLayout *layout, int row, const QString& label, const QString& value,
+                        const QString& valueColor = QString(), const QString& suffixHtml = QString());
     void retranslateUi();
     void updateLanguageButtons();
     void updateThemeToggleIcon();
@@ -86,9 +92,19 @@ private:
     QPushButton *m_previewEditBtn;
     QPushButton *m_previewOpenBtn;
     QLineEdit *m_previewTitleEdit;
-    QTextEdit *m_previewPane;
     QTabWidget *m_tabWidget;
     QWidget *m_overviewTab;
+    QLabel *m_overviewEmptyLabel;
+    QWidget *m_overviewContent;
+    QLabel *m_overviewPathLabel;
+    QFrame *m_vaultStatsCard;
+    QLabel *m_vaultStatsHeader;
+    QWidget *m_vaultStatsBody;
+    QGridLayout *m_vaultStatsGrid;
+    QFrame *m_r2moStatsCard;
+    QLabel *m_r2moStatsHeader;
+    QWidget *m_r2moStatsBody;
+    QGridLayout *m_r2moStatsGrid;
     QWidget *m_tasksTab;
     QWidget *m_graphTab;
     QGraphicsView *m_graphView;

@@ -37,6 +37,7 @@
 #include <QTabWidget>
 #include <QWheelEvent>
 #include <QHeaderView>
+#include <QSpacerItem>
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
@@ -56,9 +57,19 @@ MainWindow::MainWindow(QWidget *parent)
     , m_previewEditBtn(nullptr)
     , m_previewOpenBtn(nullptr)
     , m_previewTitleEdit(nullptr)
-    , m_previewPane(nullptr)
     , m_tabWidget(nullptr)
     , m_overviewTab(nullptr)
+    , m_overviewEmptyLabel(nullptr)
+    , m_overviewContent(nullptr)
+    , m_overviewPathLabel(nullptr)
+    , m_vaultStatsCard(nullptr)
+    , m_vaultStatsHeader(nullptr)
+    , m_vaultStatsBody(nullptr)
+    , m_vaultStatsGrid(nullptr)
+    , m_r2moStatsCard(nullptr)
+    , m_r2moStatsHeader(nullptr)
+    , m_r2moStatsBody(nullptr)
+    , m_r2moStatsGrid(nullptr)
     , m_tasksTab(nullptr)
     , m_graphTab(nullptr)
     , m_graphView(nullptr)
@@ -395,13 +406,63 @@ void MainWindow::setupCentralWidget()
     overviewLayout->setContentsMargins(8, 8, 8, 8);
     overviewLayout->setSpacing(8);
     
-    m_previewPane = new QTextEdit;
-    m_previewPane->setReadOnly(true);
-    m_previewPane->setPlaceholderText(tr("Select a vault to view details..."));
-    m_previewPane->setFrameShape(QFrame::NoFrame);
-    m_previewPane->setStyleSheet("QTextEdit { border: none; background: white; padding: 0px; margin: 0px; }");
+    m_overviewEmptyLabel = new QLabel(tr("Select a vault to view details..."));
+    m_overviewEmptyLabel->setAlignment(Qt::AlignCenter);
+    m_overviewEmptyLabel->setWordWrap(true);
+    m_overviewEmptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 24px; }");
+    overviewLayout->addWidget(m_overviewEmptyLabel, 1);
 
-    overviewLayout->addWidget(m_previewPane, 1);
+    m_overviewContent = new QWidget;
+    QVBoxLayout *overviewContentLayout = new QVBoxLayout(m_overviewContent);
+    overviewContentLayout->setContentsMargins(0, 0, 0, 0);
+    overviewContentLayout->setSpacing(8);
+
+    m_overviewPathLabel = new QLabel;
+    m_overviewPathLabel->setWordWrap(true);
+    m_overviewPathLabel->setStyleSheet("QLabel { color: #ff3b30; font-size: 17px; background: transparent; }");
+    overviewContentLayout->addWidget(m_overviewPathLabel);
+
+    m_vaultStatsCard = new QFrame;
+    m_vaultStatsCard->setStyleSheet("QFrame { background: transparent; border: none; }");
+    QVBoxLayout *vaultCardLayout = new QVBoxLayout(m_vaultStatsCard);
+    vaultCardLayout->setContentsMargins(0, 0, 0, 0);
+    vaultCardLayout->setSpacing(0);
+    m_vaultStatsHeader = new QLabel(tr("📊 Vault Statistics"));
+    m_vaultStatsHeader->setStyleSheet("QLabel { background: #f5f5f7; color: #1d1d1f; font-size: 15px; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e0e0e0; }");
+    vaultCardLayout->addWidget(m_vaultStatsHeader);
+    m_vaultStatsBody = new QWidget;
+    m_vaultStatsBody->setStyleSheet("QWidget { background: transparent; }");
+    m_vaultStatsGrid = new QGridLayout(m_vaultStatsBody);
+    m_vaultStatsGrid->setContentsMargins(0, 0, 0, 0);
+    m_vaultStatsGrid->setHorizontalSpacing(0);
+    m_vaultStatsGrid->setVerticalSpacing(0);
+    m_vaultStatsGrid->setColumnStretch(0, 1);
+    m_vaultStatsGrid->setColumnStretch(1, 1);
+    vaultCardLayout->addWidget(m_vaultStatsBody);
+    overviewContentLayout->addWidget(m_vaultStatsCard);
+
+    m_r2moStatsCard = new QFrame;
+    m_r2moStatsCard->setStyleSheet("QFrame { background: transparent; border: none; }");
+    QVBoxLayout *r2moCardLayout = new QVBoxLayout(m_r2moStatsCard);
+    r2moCardLayout->setContentsMargins(0, 0, 0, 0);
+    r2moCardLayout->setSpacing(0);
+    m_r2moStatsHeader = new QLabel(tr("🔧 R2MO Statistics"));
+    m_r2moStatsHeader->setStyleSheet("QLabel { background: #f5f5f7; color: #1d1d1f; font-size: 15px; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e0e0e0; }");
+    r2moCardLayout->addWidget(m_r2moStatsHeader);
+    m_r2moStatsBody = new QWidget;
+    m_r2moStatsBody->setStyleSheet("QWidget { background: transparent; }");
+    m_r2moStatsGrid = new QGridLayout(m_r2moStatsBody);
+    m_r2moStatsGrid->setContentsMargins(0, 0, 0, 0);
+    m_r2moStatsGrid->setHorizontalSpacing(0);
+    m_r2moStatsGrid->setVerticalSpacing(0);
+    m_r2moStatsGrid->setColumnStretch(0, 1);
+    m_r2moStatsGrid->setColumnStretch(1, 1);
+    r2moCardLayout->addWidget(m_r2moStatsBody);
+    overviewContentLayout->addWidget(m_r2moStatsCard);
+
+    overviewContentLayout->addStretch(1);
+    overviewLayout->addWidget(m_overviewContent, 1);
+    setOverviewEmptyState(true);
     m_tabWidget->addTab(m_overviewTab, tr("概览"));
     
     // Tab 2: Project Tasks (项目任务)
@@ -764,7 +825,7 @@ void MainWindow::onRemoveVault()
     QString path = item->data(Qt::UserRole).toString();
     m_vaultModel->removeVault(path);
     m_vaultModel->save(m_configPath);
-    m_previewPane->clear();
+    setOverviewEmptyState(true);
 }
 
 void MainWindow::onRenameVault()
@@ -831,7 +892,7 @@ void MainWindow::onVaultContextMenu(const QPoint &pos)
         QString path = item->data(Qt::UserRole).toString();
         m_vaultModel->removeVault(path);
         m_vaultModel->save(m_configPath);
-        m_previewPane->clear();
+        setOverviewEmptyState(true);
     }
 }
 
@@ -911,22 +972,15 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
     // Clear previous content
     m_graphScene->clear();
     m_taskTree->clear();
+    if (path.trimmed().isEmpty()) {
+        setOverviewEmptyState(true);
+        return;
+    }
 
-    QString info;
-    info += tr("<style>"
-        "body { margin: 0; padding: 0; }"
-        "table { width: 100%; border-collapse: collapse; margin: 0 0 8px 0; table-layout: fixed; }"
-        "th { text-align: left; padding: 14px 20px; background: #f5f5f7; font-weight: 600; border-bottom: 2px solid #e0e0e0; font-size: 15px; }"
-        "td { padding: 14px 20px; border-bottom: 1px solid #e8e8ed; }"
-        "tr:hover { background: #fafafa; }"
-        ".label { color: #86868b; width: 50%; }"
-        ".value { font-weight: 500; width: 50%; }"
-        ".status-ok { color: #34c759; }"
-        ".status-info { color: #007aff; }"
-        ".status-warning { color: #ff9500; }"
-        ".path-bar { color: #ff3b30; font-size: 17px; padding: 0 0 8px 0; margin: 0 0 8px 0; }"
-        "</style>");
-    info += tr("<div class='path-bar'>%1</div>").arg(path);
+    setOverviewEmptyState(false);
+    m_overviewPathLabel->setText(path);
+    clearOverviewGrid(m_vaultStatsGrid);
+    clearOverviewGrid(m_r2moStatsGrid);
 
     QDir vaultDir(path);
     if (vaultDir.exists()) {
@@ -950,17 +1004,15 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
             }
         }
 
-        info += tr("<table>");
-        info += tr("<tr><th colspan='2'>📊 %1</th></tr>").arg(tr("Vault Statistics"));
-        info += tr("<tr><td class='label'>%1</td><td class='value'>%2</td></tr>").arg(tr("Files")).arg(files);
-        info += tr("<tr><td class='label'>%1</td><td class='value'>%2</td></tr>").arg(tr("Folders")).arg(folders);
+        int vaultRow = 0;
+        addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Files"), QString::number(files));
+        addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Folders"), QString::number(folders));
         if (hiddenItems > 0) {
-            info += tr("<tr><td class='label'>%1</td><td class='value'>%2 <span style='color: #86868b;'>(.obsidian, .r2mo)</span></td></tr>").arg(tr("Hidden Items")).arg(hiddenItems);
+            addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Hidden Items"), QString::number(hiddenItems), QString(), tr("(.obsidian, .r2mo)"));
         }
         if (m_vaultValidator->hasObsidianConfig(path)) {
-            info += tr("<tr><td class='label'>%1</td><td class='value status-ok'>✓ %2</td></tr>").arg(tr("Obsidian")).arg(tr("Valid Vault"));
+            addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Obsidian"), tr("✓ Valid Vault"), "#34c759");
         }
-        info += tr("</table>");
         
         // Check for .r2mo folder and show detailed info
         if (m_vaultValidator->hasR2moConfig(path)) {
@@ -978,13 +1030,11 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
                     totalHistorical += proj.historicalTaskCount;
                 }
                 
-                info += tr("<table>");
-                info += tr("<tr><th colspan='2'>🔧 %1</th></tr>").arg(tr("R2MO Statistics"));
-                info += tr("<tr><td class='label'>%1</td><td class='value status-info'>✓ %2</td></tr>").arg(tr("Configuration")).arg(tr("Detected"));
-                info += tr("<tr><td class='label'>%1</td><td class='value'>%2</td></tr>").arg(tr("Total Projects")).arg(projects.size());
-                info += tr("<tr><td class='label'>%1</td><td class='value status-warning'>%2 %3</td></tr>").arg(tr("Task Queue")).arg(totalQueue).arg(tr("pending"));
-                info += tr("<tr><td class='label'>%1</td><td class='value status-ok'>%2 %3</td></tr>").arg(tr("Historical Tasks")).arg(totalHistorical).arg(tr("completed"));
-                info += tr("</table>");
+                int r2moRow = 0;
+                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Configuration"), tr("✓ Detected"), "#007aff");
+                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Total Projects"), QString::number(projects.size()));
+                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Task Queue"), QString("%1 %2").arg(totalQueue).arg(tr("pending")), "#ff9500");
+                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Historical Tasks"), QString("%1 %2").arg(totalHistorical).arg(tr("completed")), "#34c759");
                 
                 // Draw directed graph for project relationships (in Graph tab)
                 drawProjectGraph(projects);
@@ -992,15 +1042,58 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
                 // Build expandable task tree (in Tasks tab)
                 buildTaskTree(projects);
             }
+            m_r2moStatsCard->setVisible(!projects.isEmpty());
+        } else {
+            m_r2moStatsCard->setVisible(false);
         }
     } else {
-        info += tr("<table>");
-        info += tr("<tr><th colspan='2'>⚠ %1</th></tr>").arg(tr("Warning"));
-        info += tr("<tr><td colspan='2' style='color: #ff3b30;'>%1</td></tr>").arg(tr("Path does not exist"));
-        info += tr("</table>");
+        addOverviewRow(m_vaultStatsGrid, 0, tr("Warning"), tr("Path does not exist"), "#ff3b30");
+        m_r2moStatsCard->setVisible(false);
     }
+}
 
-    m_previewPane->setHtml(info);
+void MainWindow::setOverviewEmptyState(bool empty)
+{
+    m_overviewEmptyLabel->setVisible(empty);
+    m_overviewContent->setVisible(!empty);
+    if (empty) {
+        clearOverviewGrid(m_vaultStatsGrid);
+        clearOverviewGrid(m_r2moStatsGrid);
+    }
+}
+
+void MainWindow::clearOverviewGrid(QGridLayout *layout)
+{
+    if (!layout) return;
+    while (QLayoutItem *item = layout->takeAt(0)) {
+        if (item->widget()) {
+            item->widget()->deleteLater();
+        }
+        delete item;
+    }
+    layout->setColumnStretch(0, 1);
+    layout->setColumnStretch(1, 1);
+}
+
+void MainWindow::addOverviewRow(QGridLayout *layout, int row, const QString& label, const QString& value,
+                                const QString& valueColor, const QString& suffixHtml)
+{
+    QLabel *labelWidget = new QLabel(label);
+    labelWidget->setStyleSheet("QLabel { color: #86868b; font-size: 14px; padding: 14px 20px; border-bottom: 1px solid #e8e8ed; }");
+    labelWidget->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+
+    QString valueText = value;
+    if (!suffixHtml.isEmpty()) {
+        valueText += QString(" <span style='color: #86868b;'>%1</span>").arg(suffixHtml.toHtmlEscaped());
+    }
+    QLabel *valueWidget = new QLabel(valueText);
+    valueWidget->setTextFormat(Qt::RichText);
+    valueWidget->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    QString color = valueColor.isEmpty() ? QString("#1d1d1f") : valueColor;
+    valueWidget->setStyleSheet(QString("QLabel { color: %1; font-size: 14px; font-weight: 500; padding: 14px 20px; border-bottom: 1px solid #e8e8ed; }").arg(color));
+
+    layout->addWidget(labelWidget, row, 0);
+    layout->addWidget(valueWidget, row, 1);
 }
 
 void MainWindow::drawProjectGraph(const QList<R2moSubProject>& projects)
