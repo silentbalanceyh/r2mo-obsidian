@@ -103,7 +103,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${{ inputs.version }}"
+          TAG="${{ github.event.inputs.version }}"
           if [ -z "$TAG" ]; then
             REF_NAME="${GITHUB_REF_NAME:-}"
             if [[ "$REF_NAME" == release-* ]]; then
