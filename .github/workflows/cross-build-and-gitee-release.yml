@@ -11,6 +11,9 @@ on:
     tags:
       - "release-*"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build ${{ matrix.os }}-${{ matrix.arch }}
@@ -166,6 +169,7 @@ PY
               -F "body=${BODY}" \
               -F "prerelease=false")
 
+            export CREATE_RESP
             RELEASE_ID=$(python3 - <<'PY'
 import json, os
 resp = json.loads(os.environ['CREATE_RESP'])
