@@ -124,3 +124,42 @@ Currently no automated tests. Manual testing:
 2. Run and verify UI
 3. Test vault operations
 4. Check Obsidian integration
+
+## Release Workflow (CI + Script)
+
+### Goal
+- Publish cross-platform artifacts to a single Gitee release tag.
+
+### CI Workflow
+- File: `.github/workflows/gitee-release-ci.yml`
+- Trigger: `workflow_dispatch` with input `version` (e.g. `v1.0.0`)
+- Artifacts (current lanes):
+  - Windows x64
+  - Linux x64
+  - Linux arm64
+  - macOS arm64
+  - macOS x64
+
+### Required Secrets / Variables
+- GitHub Actions Secret:
+  - `GITEE_TOKEN`
+- GitHub Actions Variables:
+  - `GITEE_OWNER` (default in workflow: `silentbalanceyh`)
+  - `GITEE_REPO` (default in workflow: `r2mo-obsidian`)
+
+### Local Automation Script
+- File: `scripts/release_gitee.sh`
+- Usage:
+```bash
+scripts/release_gitee.sh v1.0.0
+```
+- What it does:
+  1. Dispatches `gitee-release-ci.yml`
+  2. Locates latest run ID
+  3. Watches until completion
+  4. Prints final status
+
+### Agent Release Rules
+- Use CI for release artifacts; do not manually upload binaries unless CI is blocked.
+- Always publish all platform artifacts to the same release tag.
+- Verify release page contains downloadable assets before reporting release complete.

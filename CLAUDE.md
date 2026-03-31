@@ -136,3 +136,33 @@ The `.r2mo/` directory contains project metadata and is **NOT** ignored by git. 
 - `AGENTS.md`: Rules for AI agent processing
 - `.r2mo/design/spec.md`: UI design specifications (Tailwind-based, for reference)
 - `.r2mo/design/spec-page.md`: Page implementation specifications
+
+## Release Automation
+
+### CI Workflow (Gitee publish)
+
+- Workflow file: `.github/workflows/gitee-release-ci.yml`
+- Manual trigger input:
+  - `version` (example: `v1.0.0`)
+- CI builds and packages:
+  - Windows x64
+  - Linux x64
+  - Linux arm64
+  - macOS arm64
+  - macOS x64
+- CI uploads all artifacts to the same Gitee release tag.
+
+### Local trigger script
+
+- Script: `scripts/release_gitee.sh`
+- Usage:
+```bash
+scripts/release_gitee.sh v1.0.0
+```
+
+### Required repository secrets / vars (GitHub Actions)
+
+- Secret: `GITEE_TOKEN`
+- Variables:
+  - `GITEE_OWNER` (optional, default `silentbalanceyh`)
+  - `GITEE_REPO` (optional, default `r2mo-obsidian`)
