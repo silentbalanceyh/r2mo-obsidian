@@ -153,13 +153,7 @@ jobs:
 
           RELEASE_ID=""
           if [ "${TAG_LOOKUP_CODE}" = "200" ]; then
-            RELEASE_ID=$(python3 - <<'PY'
-import json
-with open('/tmp/gitee_release_get.json', 'r', encoding='utf-8') as f:
-    resp = json.load(f)
-print(resp.get('id', ''))
-PY
-            )
+            RELEASE_ID=$(python3 -c "import json;print(json.load(open('/tmp/gitee_release_get.json', encoding='utf-8')).get('id',''))")
           else
             CREATE_RESP=$(curl -fsS -X POST "${API_BASE}/releases" \
               -F "access_token=${GITEE_TOKEN}" \
@@ -170,12 +164,7 @@ PY
               -F "prerelease=false")
 
             export CREATE_RESP
-            RELEASE_ID=$(python3 - <<'PY'
-import json, os
-resp = json.loads(os.environ['CREATE_RESP'])
-print(resp.get('id', ''))
-PY
-            )
+            RELEASE_ID=$(python3 -c "import json,os;print(json.loads(os.environ['CREATE_RESP']).get('id',''))")
           fi
 
           if [ -z "${RELEASE_ID}" ]; then

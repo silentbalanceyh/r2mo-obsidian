@@ -114,11 +114,7 @@ jobs:
 
           CODE=$(curl -sS -o /tmp/release.json -w "%{http_code}" "${API}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}")
           if [ "$CODE" = "200" ]; then
-            RELEASE_ID=$(python3 - <<'PY'
-import json
-print(json.load(open('/tmp/release.json')).get('id',''))
-PY
-            )
+            RELEASE_ID=$(python3 -c "import json;print(json.load(open('/tmp/release.json')).get('id',''))")
           else
             RESP=$(curl -fsS -X POST "${API}/releases" \
               -F "access_token=${GITEE_TOKEN}" \
@@ -128,11 +124,7 @@ PY
               -F "body=Automated build ${RELEASE_TAG}" \
               -F "prerelease=false")
             export RESP
-            RELEASE_ID=$(python3 - <<'PY'
-import json,os
-print(json.loads(os.environ['RESP']).get('id',''))
-PY
-            )
+            RELEASE_ID=$(python3 -c "import json,os;print(json.loads(os.environ['RESP']).get('id',''))")
           fi
 
           [ -n "$RELEASE_ID" ] || { echo "Release ID missing"; exit 1; }
