@@ -8,6 +8,7 @@
   "hideStatusBar": "focused",
   "interceptLogging": true,
   "language": "",
+  "macOSOptionKeyPassthrough": true,
   "newInstanceBehavior": "newHorizontalSplit",
   "noticeTimeout": 5,
   "openChangelogOnUpdate": true,
@@ -55,8 +56,8 @@
         "SIGTERM"
       ],
       "terminalOptions": {
-        "documentOverride": null,
-        "fontFamily": "\"MesloLGS NF\", monospace"
+        "fontFamily": "\"MesloLGS NF\", monospace",
+        "documentOverride": null
       },
       "type": "integrated",
       "useWin32Conhost": true
@@ -72,8 +73,8 @@
         "SIGTERM"
       ],
       "terminalOptions": {
-        "documentOverride": null,
-        "fontFamily": "\"MesloLGS NF\", monospace"
+        "fontFamily": "\"MesloLGS NF\", monospace",
+        "documentOverride": null
       },
       "type": "developerConsole"
     },
@@ -161,5 +162,9 @@
       "type": "integrated",
       "useWin32Conhost": true
     }
+  },
+  "defaultProfile": null,
+  "terminalOptions": {
+    "documentOverride": null
   }
 }
