@@ -49,6 +49,7 @@ private slots:
     void onLanguageButtonClicked(int id);
     void onThemeChanged(ThemeManager::Theme theme);
     void onThemeToggle();
+    void onSwimlane();
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
@@ -78,6 +79,8 @@ private:
     void retranslateUi();
     void updateLanguageButtons();
     void updateThemeToggleIcon();
+    void openSwimlaneTab();
+    QWidget* buildSwimlaneView();
 
     // Toolbar
     QToolBar *m_toolBar;
@@ -85,13 +88,19 @@ private:
     QButtonGroup *m_langGroup;
     QPushButton *m_btnZh;
     QPushButton *m_btnEn;
+    QPushButton *m_addBtn;
+    QPushButton *m_removeBtn;
+    QPushButton *m_swimlaneBtn;
+    
+    // Main content tabs
+    QTabWidget *m_mainTabWidget;
+    QWidget *m_homeTabContent;
+    QWidget *m_swimlaneTabContent;
     
     // Central widget
     QSplitter *m_splitter;
     QLabel *m_vaultLabel;
     QListWidget *m_vaultList;
-    QPushButton *m_addBtn;
-    QPushButton *m_removeBtn;
     QLabel *m_previewLabel;
     QWidget *m_previewHeader;
     QLabel *m_previewTitle;
@@ -119,6 +128,9 @@ private:
     QWidget *m_aiToolsTab;
     QLabel *m_aiToolsEmptyLabel;
     QTreeWidget *m_aiToolsTree;
+    int m_swimlaneTabIndex;
+    QWidget *m_swimlaneView;
+    QWidget *m_cachedSwimlaneWidget;
     QString m_currentPreviewPath;
 
     // Modules (not owned)

@@ -539,6 +539,60 @@ QPushButton#editBtn:hover {
 QPushButton#editBtn:pressed {
     background-color: rgba(0, 0, 0, 0.08);
 }
+
+/* Toolbar icon buttons (square 32x32) */
+QPushButton#addBtn {
+    background-color: #007aff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 18px;
+    font-weight: bold;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#addBtn:hover {
+    background-color: #0056cc;
+}
+
+QPushButton#removeBtn {
+    background-color: transparent;
+    color: #ff3b30;
+    border: 1px solid #ff3b30;
+    border-radius: 6px;
+    font-size: 18px;
+    font-weight: bold;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#removeBtn:hover {
+    background-color: #ff3b30;
+    color: white;
+}
+
+QPushButton#swimlaneBtn {
+    background-color: transparent;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 6px;
+    font-size: 16px;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#swimlaneBtn:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+}
 )";
 }
 
@@ -1035,6 +1089,60 @@ QPushButton#editBtn:hover {
 
 QPushButton#editBtn:pressed {
     background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Toolbar icon buttons (square 32x32) */
+QPushButton#addBtn {
+    background-color: #0a84ff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 18px;
+    font-weight: bold;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#addBtn:hover {
+    background-color: #0070e0;
+}
+
+QPushButton#removeBtn {
+    background-color: transparent;
+    color: #ff453a;
+    border: 1px solid #ff453a;
+    border-radius: 6px;
+    font-size: 18px;
+    font-weight: bold;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#removeBtn:hover {
+    background-color: #ff453a;
+    color: white;
+}
+
+QPushButton#swimlaneBtn {
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    font-size: 16px;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#swimlaneBtn:hover {
+    background-color: rgba(255, 255, 255, 0.05);
 }
 )";
 }
