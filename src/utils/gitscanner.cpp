@@ -128,19 +128,16 @@ QString GitStatusInfo::statusColor() const
         return "#86868b"; // Gray - not a git repo
     }
     
-    bool hasLocalChanges = (modifiedCount > 0 || untrackedCount > 0 || stagedCount > 0);
-    bool hasUnpushed = (aheadCount > 0);
-    bool isClean = !hasLocalChanges && !hasUnpushed;
+    // Green if all changes are committed (staged=0, modified=0, untracked=0) and synced (behind=0)
+    // ahead > 0 is OK (committed but not pushed yet)
+    bool hasUncommitted = (stagedCount > 0 || modifiedCount > 0 || untrackedCount > 0);
+    bool needsPull = (behindCount > 0);
     
-    if (isClean) {
-        return "#34c759"; // Green - synced and clean
+    if (!hasUncommitted && !needsPull) {
+        return "#34c759"; // Green - all committed and synced
     }
     
-    if (hasUnpushed && !hasLocalChanges) {
-        return "#007aff"; // Blue - unpushed commits but clean
-    }
-    
-    return "#ff3b30"; // Red - has local changes
+    return "#ff3b30"; // Red - has uncommitted changes or needs pull
 }
 
 QString GitStatusInfo::statusText() const

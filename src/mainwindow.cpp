@@ -45,6 +45,7 @@
 #include <QStatusBar>
 #include <QPixmap>
 #include <QToolButton>
+#include <QProgressBar>
 #include <QtConcurrent>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -1839,20 +1840,53 @@ void MainWindow::onSwimlane()
     if (m_swimlaneRefreshing) return;
     m_swimlaneRefreshing = true;
 
+    // Create loading widget with progress animation
     QWidget *loadingWidget = new QWidget();
     loadingWidget->setStyleSheet("background: white;");
     QVBoxLayout *loadingLayout = new QVBoxLayout(loadingWidget);
     loadingLayout->setAlignment(Qt::AlignCenter);
+    loadingLayout->setSpacing(16);
     
-    QLabel *loadingLabel = new QLabel(tr("⏳ Loading swimlane..."));
-    loadingLabel->setAlignment(Qt::AlignCenter);
-    loadingLabel->setStyleSheet("QLabel { color: #86868b; font-size: 16px; padding: 40px; }");
-    loadingLayout->addWidget(loadingLabel);
+    // Animated loading icon
+    QLabel *iconLabel = new QLabel("⏳");
+    iconLabel->setAlignment(Qt::AlignCenter);
+    iconLabel->setStyleSheet("QLabel { font-size: 48px; background: transparent; }");
+    loadingLayout->addWidget(iconLabel);
+    
+    // Main loading text
+    QLabel *titleLabel = new QLabel(tr("Loading Swimlane View"));
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet("QLabel { color: #333; font-size: 18px; font-weight: 600; background: transparent; }");
+    loadingLayout->addWidget(titleLabel);
+    
+    // Progress text (will be updated by timer)
+    m_loadingProgressLabel = new QLabel(tr("Initializing..."));
+    m_loadingProgressLabel->setAlignment(Qt::AlignCenter);
+    m_loadingProgressLabel->setStyleSheet("QLabel { color: #86868b; font-size: 14px; background: transparent; }");
+    loadingLayout->addWidget(m_loadingProgressLabel);
+    
+    // Progress bar (indeterminate)
+    QProgressBar *progressBar = new QProgressBar();
+    progressBar->setRange(0, 0); // Indeterminate mode
+    progressBar->setFixedWidth(300);
+    progressBar->setTextVisible(false);
+    progressBar->setStyleSheet("QProgressBar { border: 1px solid #e0e0e0; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #007aff; border-radius: 3px; }");
+    loadingLayout->addWidget(progressBar);
+    
+    // Hint text
+    QLabel *hintLabel = new QLabel(tr("Scanning Git repositories, AI tools, and task queues..."));
+    hintLabel->setAlignment(Qt::AlignCenter);
+    hintLabel->setStyleSheet("QLabel { color: #86868b; font-size: 12px; background: transparent; }");
+    loadingLayout->addWidget(hintLabel);
     
     m_swimlaneTabContent = loadingWidget;
     int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
     addSwimlaneCloseButton(newIdx);
     m_mainTabWidget->setCurrentIndex(newIdx);
+    
+    // Start progress animation
+    m_loadingProgressStep = 0;
+    m_loadingProgressTimer->start();
     
     QFuture<SwimlaneScanData> future = QtConcurrent::run([this]() {
         return this->collectSwimlaneData();
@@ -2094,7 +2128,7 @@ QWidget* MainWindow::buildSwimlaneView(const SwimlaneScanData& scanData)
         nameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         nameLabel->setFixedSize(nameColWidth, rowHeight);
         bool hasChanges = (gitStatus.isGitRepo && 
-                          (gitStatus.aheadCount > 0 || gitStatus.behindCount > 0 ||
+                          (gitStatus.behindCount > 0 ||
                            gitStatus.stagedCount > 0 || gitStatus.modifiedCount > 0 || 
                            gitStatus.untrackedCount > 0));
         QString nameColor = hasChanges ? "#8b2500" : "#2e7d32";
@@ -2181,11 +2215,12 @@ QWidget* MainWindow::buildSwimlaneView(const SwimlaneScanData& scanData)
             gitLayout->setContentsMargins(0, 0, 0, 0);
             gitLayout->setSpacing(6);
             
-            bool hasChanges = (vd.gitStatus.aheadCount > 0 || vd.gitStatus.behindCount > 0 ||
+            bool hasChanges = (vd.gitStatus.behindCount > 0 ||
                               vd.gitStatus.stagedCount > 0 || vd.gitStatus.modifiedCount > 0 || 
                               vd.gitStatus.untrackedCount > 0);
             
-            QString branchText = hasChanges ? QString("★ %1").arg(vd.gitStatus.branch) : vd.gitStatus.branch;
+            QString branchText = hasChanges ? QString("★ %1").arg(vd.gitStatus.branch) : 
+                                  (vd.gitStatus.aheadCount > 0 ? QString("↑ %1").arg(vd.gitStatus.branch) : vd.gitStatus.branch);
             QString branchColor = hasChanges ? "#b8860b" : "#34c759";
             QLabel *branchLabel = new QLabel(branchText);
             branchLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 14px; background: transparent; border: none; font-weight: 600; }").arg(branchColor));
@@ -2281,14 +2316,38 @@ void MainWindow::refreshSwimlaneAsync()
     
     m_swimlaneRefreshing = true;
     
+    // Create loading widget with progress animation
     QWidget *loadingOverlay = new QWidget();
-    loadingOverlay->setStyleSheet("background: rgba(255, 255, 255, 0.9);");
+    loadingOverlay->setStyleSheet("background: rgba(255, 255, 255, 0.95);");
     QVBoxLayout *overlayLayout = new QVBoxLayout(loadingOverlay);
     overlayLayout->setAlignment(Qt::AlignCenter);
-    QLabel *loadingLabel = new QLabel(tr("⏳ Refreshing..."));
-    loadingLabel->setAlignment(Qt::AlignCenter);
-    loadingLabel->setStyleSheet("QLabel { color: #86868b; font-size: 16px; padding: 40px; }");
-    overlayLayout->addWidget(loadingLabel);
+    overlayLayout->setSpacing(16);
+    
+    // Animated loading icon
+    QLabel *iconLabel = new QLabel("🔄");
+    iconLabel->setAlignment(Qt::AlignCenter);
+    iconLabel->setStyleSheet("QLabel { font-size: 48px; background: transparent; }");
+    overlayLayout->addWidget(iconLabel);
+    
+    // Main loading text
+    QLabel *titleLabel = new QLabel(tr("Refreshing Swimlane View"));
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet("QLabel { color: #333; font-size: 18px; font-weight: 600; background: transparent; }");
+    overlayLayout->addWidget(titleLabel);
+    
+    // Progress text (will be updated by timer)
+    m_loadingProgressLabel = new QLabel(tr("Initializing..."));
+    m_loadingProgressLabel->setAlignment(Qt::AlignCenter);
+    m_loadingProgressLabel->setStyleSheet("QLabel { color: #86868b; font-size: 14px; background: transparent; }");
+    overlayLayout->addWidget(m_loadingProgressLabel);
+    
+    // Progress bar (indeterminate)
+    QProgressBar *progressBar = new QProgressBar();
+    progressBar->setRange(0, 0);
+    progressBar->setFixedWidth(300);
+    progressBar->setTextVisible(false);
+    progressBar->setStyleSheet("QProgressBar { border: 1px solid #e0e0e0; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #007aff; border-radius: 3px; }");
+    overlayLayout->addWidget(progressBar);
     
     m_cachedSwimlaneWidget = m_swimlaneTabContent;
     m_mainTabWidget->removeTab(idx);
@@ -2296,6 +2355,10 @@ void MainWindow::refreshSwimlaneAsync()
     int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
     addSwimlaneCloseButton(newIdx);
     m_mainTabWidget->setCurrentIndex(newIdx);
+    
+    // Start progress animation
+    m_loadingProgressStep = 0;
+    m_loadingProgressTimer->start();
     
     QFuture<SwimlaneScanData> future = QtConcurrent::run([this]() {
         return this->collectSwimlaneData();
