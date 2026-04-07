@@ -666,6 +666,7 @@ void MainWindow::setupConnections()
     m_swimlaneRefreshTimer = new QTimer(this);
     m_swimlaneRefreshTimer->setInterval(10000);
     connect(m_swimlaneRefreshTimer, &QTimer::timeout, this, &MainWindow::onSwimlaneRefresh);
+    m_swimlaneRefreshTimer->start(); // Start immediately on app launch
     
     // Loading progress animation timer
     m_loadingProgressTimer = new QTimer(this);
@@ -694,13 +695,16 @@ void MainWindow::setupConnections()
             
             SwimlaneScanData data = m_swimlaneScanWatcher->result();
             QWidget *newWidget = buildSwimlaneView(data);
+            
+            // Always update cache with fresh data
             m_cachedSwimlaneWidget = newWidget;
             
+            // Update visible tab if showing swimlane
             if (m_swimlaneTabContent && m_mainTabWidget->indexOf(m_swimlaneTabContent) >= 0) {
                 int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
-                bool isVisible = (m_mainTabWidget->currentIndex() == idx);
                 
-                if (isVisible) {
+                // If swimlane tab is currently visible, update it
+                if (m_mainTabWidget->currentIndex() == idx) {
                     m_mainTabWidget->removeTab(idx);
                     m_swimlaneTabContent = newWidget;
                     int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
