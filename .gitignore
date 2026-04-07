@@ -38,5 +38,8 @@ qrc_*.cpp
 # Logs
 *.log
 
+# Local runtime pid files
+.dev-app.pid
+
 # Keep .r2mo directory (project metadata)
 # .r2mo/ is NOT ignored
