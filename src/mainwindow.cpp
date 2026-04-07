@@ -1924,16 +1924,23 @@ QWidget* MainWindow::buildSwimlaneView()
         }
         grid->addWidget(nameLabel, row, 0);
 
-        // Historical count — clickable
-        QLabel *histLabel = new QLabel(QString::number(histCount));
-        histLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-        histLabel->setFixedSize(histColWidth, rowHeight);
-        histLabel->setCursor(Qt::PointingHandCursor);
-        histLabel->setStyleSheet(QString("QLabel { color: #007aff; font-size: 11px; padding: 2px 4px; background: %1; border-bottom: 1px solid %2; text-decoration: underline; }").arg(laneBg.name()).arg(borderColor.name()));
-        histLabel->setProperty("r2moPath", r2moPath);
-        histLabel->setProperty("projectName", name);
-        histLabel->installEventFilter(this);
-        grid->addWidget(histLabel, row, 1);
+        // Historical count — only show if > 0, clickable
+        if (histCount > 0) {
+            QLabel *histLabel = new QLabel(QString::number(histCount));
+            histLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+            histLabel->setFixedSize(histColWidth, rowHeight);
+            histLabel->setCursor(Qt::PointingHandCursor);
+            histLabel->setStyleSheet(QString("QLabel { color: #007aff; font-size: 11px; padding: 2px 4px; background: %1; border-bottom: 1px solid %2; text-decoration: underline; }").arg(laneBg.name()).arg(borderColor.name()));
+            histLabel->setProperty("r2moPath", r2moPath);
+            histLabel->setProperty("projectName", name);
+            histLabel->installEventFilter(this);
+            grid->addWidget(histLabel, row, 1);
+        } else {
+            QLabel *emptyHist = new QLabel("");
+            emptyHist->setFixedSize(histColWidth, rowHeight);
+            emptyHist->setStyleSheet(QString("QLabel { background: %1; border-bottom: 1px solid %2; }").arg(laneBg.name()).arg(borderColor.name()));
+            grid->addWidget(emptyHist, row, 1);
+        }
 
         // Queue cells — running tasks in blue, empty slots with gray border
         for (int col = 0; col < gridColCount; ++col) {
@@ -1951,9 +1958,9 @@ QWidget* MainWindow::buildSwimlaneView()
 
     // Build rows for each vault
     for (const VaultSwimlaneData &vd : allVaultData) {
-        // Vault header
+        // Vault header — gradient background, purple text
         QLabel *vaultHeader = new QLabel(QString("📁 %1").arg(vd.vaultName));
-        vaultHeader->setStyleSheet(QString("QLabel { color: #1d1d1f; font-size: 13px; font-weight: 600; padding: 8px 8px 4px 8px; background: %1; border-bottom: 2px solid #007aff; }").arg(headerBg.name()));
+        vaultHeader->setStyleSheet(QString("QLabel { color: #af52de; font-size: 13px; font-weight: 600; padding: 8px 12px; background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e8f4ff, stop:0.5 #f0e8ff, stop:1 #fff8f0); border: 1px solid #007aff; border-radius: 6px; }"));
         contentLayout->addWidget(vaultHeader);
 
         QWidget *gridWidget = new QWidget();
@@ -1998,6 +2005,7 @@ QWidget* MainWindow::buildSwimlaneView()
         }
 
         contentLayout->addWidget(gridWidget);
+        contentLayout->addSpacing(12);
     }
 
     contentLayout->addStretch(1);
@@ -2133,8 +2141,8 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         return true;
     }
 
-    // Handle double-click on historical count labels in swimlane
-    if (event->type() == QEvent::MouseButtonDblClick) {
+    // Handle click on historical count labels in swimlane
+    if (event->type() == QEvent::MouseButtonPress) {
         QLabel *label = qobject_cast<QLabel*>(watched);
         if (label && label->property("r2moPath").isValid()) {
             const QString r2moPath = label->property("r2moPath").toString();

@@ -56,12 +56,24 @@ QList<R2moSubProject> R2moScanner::scanVault(const QString& vaultPath)
     
     projects.append(mainProject);
     
-    // Scan for sub-projects (directories containing .r2mo)
+    // Scan for sub-projects (DPA architecture only: -ui, -provider, -domain, -api)
     QDir vaultDir(actualVaultPath);
     vaultDir.setFilter(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
     
+    QStringList dpaSuffixes = { "-ui", "-provider", "-domain", "-api" };
     QStringList subDirs = vaultDir.entryList();
     for (const QString& subDir : subDirs) {
+        bool isDpaProject = false;
+        for (const QString& suffix : dpaSuffixes) {
+            if (subDir.endsWith(suffix)) {
+                isDpaProject = true;
+                break;
+            }
+        }
+        if (!isDpaProject) {
+            continue;
+        }
+        
         QString subPath = actualVaultPath + "/" + subDir;
         QString subR2moPath = subPath + "/.r2mo";
         
@@ -150,9 +162,9 @@ QList<TaskInfo> R2moScanner::getHistoricalTasks(const QString& r2moPath)
 
     // Historical sources:
     // 1) .r2mo/task/YYYY-MM-DD/*.md
-    // 2) .r2mo/history/YYYY-MM-DD/*.md
+    // 2) .r2mo/task/history/YYYY-MM-DD/*.md
     scanDateDirectories(r2moPath + "/task");
-    scanDateDirectories(r2moPath + "/history");
+    scanDateDirectories(r2moPath + "/task/history");
     
     // Sort by runAt time (if available) or modified time (newest first)
     std::sort(tasks.begin(), tasks.end(), [](const TaskInfo& a, const TaskInfo& b) {
