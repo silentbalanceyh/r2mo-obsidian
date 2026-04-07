@@ -119,22 +119,39 @@ jobs:
             exit 1
           fi
 
+          RELEASE_ID=""
+
           CODE=$(curl -sS -o /tmp/release.json -w "%{http_code}" "${API}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}")
           if [ "$CODE" = "200" ]; then
-            RELEASE_ID=$(python3 -c "import json;print(json.load(open('/tmp/release.json')).get('id',''))")
-          else
-            RESP=$(curl -fsS -X POST "${API}/releases" \
+            RELEASE_ID=$(python3 -c "import json;d=json.load(open('/tmp/release.json'));print(d.get('id','') if isinstance(d,dict) else '')" 2>/dev/null || true)
+          fi
+
+          if [ -z "$RELEASE_ID" ]; then
+            CREATE_CODE=$(curl -sS -o /tmp/create_release.json -w "%{http_code}" -X POST "${API}/releases" \
               -F "access_token=${GITEE_TOKEN}" \
               -F "tag_name=${RELEASE_TAG}" \
               -F "target_commitish=${COMMIT_SHA}" \
               -F "name=${RELEASE_TAG}" \
               -F "body=Automated build ${RELEASE_TAG}" \
               -F "prerelease=false")
-            export RESP
-            RELEASE_ID=$(python3 -c "import json,os;print(json.loads(os.environ['RESP']).get('id',''))")
+
+            if [ "$CREATE_CODE" != "201" ] && [ "$CREATE_CODE" != "200" ]; then
+              echo "Create release failed: HTTP ${CREATE_CODE}"
+              cat /tmp/create_release.json
+              exit 1
+            fi
+
+            RELEASE_ID=$(python3 -c "import json;d=json.load(open('/tmp/create_release.json'));print(d.get('id','') if isinstance(d,dict) else '')" 2>/dev/null || true)
           fi
 
-          [ -n "$RELEASE_ID" ] || { echo "Release ID missing"; exit 1; }
+          if [ -z "$RELEASE_ID" ]; then
+            echo "Release ID missing"
+            echo "get release response:"
+            cat /tmp/release.json || true
+            echo "create release response:"
+            cat /tmp/create_release.json || true
+            exit 1
+          fi
 
           for f in dist/*; do
             [ -f "$f" ] || continue
