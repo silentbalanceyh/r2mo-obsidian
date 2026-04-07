@@ -16,7 +16,7 @@
 #include <QTabWidget>
 #include <QFrame>
 #include <QGridLayout>
-#include <QPixmap>
+#include <QTimer>
 #include "theme/thememanager.h"
 
 // Forward declarations
@@ -50,6 +50,7 @@ private slots:
     void onThemeChanged(ThemeManager::Theme theme);
     void onThemeToggle();
     void onSwimlane();
+    void onSwimlaneRefresh();
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
@@ -132,6 +133,7 @@ private:
     int m_swimlaneTabIndex;
     QWidget *m_swimlaneView;
     QWidget *m_cachedSwimlaneWidget;
+    QTimer *m_swimlaneRefreshTimer;
     QString m_currentPreviewPath;
 
     // Modules (not owned)

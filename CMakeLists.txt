@@ -61,6 +61,11 @@ set(FONT_RESOURCES
     src/fonts/fonts.qrc
 )
 
+# AI tools icon resources
+set(AI_TOOLS_RESOURCES
+    src/icons/ai-tools.qrc
+)
+
 # Translation files
 set(TS_FILES
     translations/obsidianmanager_zh_CN.ts
@@ -72,7 +77,7 @@ if(BUILD_TRANSLATIONS)
     qt_add_translations(ObsidianManager TS_FILES ${TS_FILES})
 endif()
 
-qt_add_executable(ObsidianManager ${SOURCES} ${FONT_RESOURCES})
+qt_add_executable(ObsidianManager ${SOURCES} ${FONT_RESOURCES} ${AI_TOOLS_RESOURCES})
 
 target_link_libraries(ObsidianManager PRIVATE
     Qt6::Core

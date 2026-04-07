@@ -19,6 +19,7 @@ GitStatusInfo GitScanner::scanRepository(const QString& repoPath)
     info.untrackedCount = 0;
     info.hasConflicts = false;
     
+    QString actualRepoPath = repoPath;
     QDir dir(repoPath);
     if (!dir.exists()) {
         return info;
@@ -26,14 +27,26 @@ GitStatusInfo GitScanner::scanRepository(const QString& repoPath)
     
     QString gitDir = repoPath + "/.git";
     if (!QDir(gitDir).exists()) {
-        return info;
+        QDir checkDir(repoPath);
+        while (checkDir.cdUp()) {
+            if (QDir(checkDir.path() + "/.git").exists()) {
+                actualRepoPath = checkDir.path();
+                break;
+            }
+            if (checkDir.isRoot()) {
+                break;
+            }
+        }
+        if (actualRepoPath == repoPath) {
+            return info;
+        }
     }
     
     info.isGitRepo = true;
     
-    QString branchOutput = runGitCommandSimple(repoPath, {"symbolic-ref", "--short", "HEAD"});
+    QString branchOutput = runGitCommandSimple(actualRepoPath, {"symbolic-ref", "--short", "HEAD"});
     if (branchOutput.isEmpty()) {
-        branchOutput = runGitCommandSimple(repoPath, {"rev-parse", "--short", "HEAD"});
+        branchOutput = runGitCommandSimple(actualRepoPath, {"rev-parse", "--short", "HEAD"});
         if (!branchOutput.isEmpty()) {
             info.branch = "HEAD:" + branchOutput.left(7);
         } else {
@@ -43,7 +56,7 @@ GitStatusInfo GitScanner::scanRepository(const QString& repoPath)
         info.branch = branchOutput;
     }
     
-    QString aheadBehind = runGitCommandSimple(repoPath, {"rev-list", "--left-right", "--count", "@{upstream}...HEAD"});
+    QString aheadBehind = runGitCommandSimple(actualRepoPath, {"rev-list", "--left-right", "--count", "@{upstream}...HEAD"});
     if (!aheadBehind.isEmpty()) {
         QStringList parts = aheadBehind.split('\t');
         if (parts.size() == 2) {
@@ -53,7 +66,7 @@ GitStatusInfo GitScanner::scanRepository(const QString& repoPath)
     }
     
     QString statusOutput;
-    if (runGitCommand(repoPath, {"status", "--porcelain"}, statusOutput)) {
+    if (runGitCommand(actualRepoPath, {"status", "--porcelain"}, statusOutput)) {
         QStringList lines = statusOutput.split('\n', Qt::SkipEmptyParts);
         for (const QString& line : lines) {
             if (line.length() < 2) continue;

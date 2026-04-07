@@ -43,6 +43,7 @@
 #include <QHeaderView>
 #include <QSpacerItem>
 #include <QStatusBar>
+#include <QPixmap>
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
@@ -87,6 +88,7 @@ MainWindow::MainWindow(QWidget *parent)
      , m_swimlaneTabIndex(-1)
      , m_swimlaneView(nullptr)
      , m_cachedSwimlaneWidget(nullptr)
+     , m_swimlaneRefreshTimer(nullptr)
      , m_vaultModel(nullptr)
      , m_settingsManager(nullptr)
      , m_vaultValidator(nullptr)
@@ -664,9 +666,17 @@ void MainWindow::setupConnections()
             if (w == m_swimlaneTabContent) {
                 m_swimlaneTabContent->deleteLater();
                 m_swimlaneTabContent = nullptr;
+                if (m_swimlaneRefreshTimer) {
+                    m_swimlaneRefreshTimer->stop();
+                }
             }
         }
     });
+    
+    // Swimlane refresh timer (30 seconds)
+    m_swimlaneRefreshTimer = new QTimer(this);
+    m_swimlaneRefreshTimer->setInterval(30000);
+    connect(m_swimlaneRefreshTimer, &QTimer::timeout, this, &MainWindow::onSwimlaneRefresh);
 }
 
 void MainWindow::updateVaultList()
@@ -1782,6 +1792,11 @@ void MainWindow::onSwimlane()
     // HOME tab remains non-closeable
     m_mainTabWidget->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
     m_mainTabWidget->setCurrentIndex(newIdx);
+    
+    // Start refresh timer
+    if (m_swimlaneRefreshTimer) {
+        m_swimlaneRefreshTimer->start();
+    }
 }
 
 QWidget* MainWindow::buildSwimlaneView()
@@ -1929,16 +1944,15 @@ QWidget* MainWindow::buildSwimlaneView()
                           int histCount, const QList<TaskInfo> &queueTasks,
                           const QString &r2moPath, bool isChild,
                           const GitStatusInfo &gitStatus) {
-        // Name label — fixed width for alignment, Git status color
+        Q_UNUSED(gitStatus);
+        
+        // Name label — fixed width for alignment, red color only
         QString nameText = isChild ? QString("  └ %1").arg(name) : name;
-        if (gitStatus.isGitRepo) {
-            nameText += QString(" [%1]").arg(gitStatus.statusText());
-        }
         QLabel *nameLabel = new QLabel(nameText);
         nameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-        nameLabel->setFixedSize(nameColWidth + 60, rowHeight);
-        nameLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 12px; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }")
-            .arg(gitStatus.statusColor()).arg(laneBg.name()).arg(borderColor.name()));
+        nameLabel->setFixedSize(nameColWidth, rowHeight);
+        nameLabel->setStyleSheet(QString("QLabel { color: #ff3b30; font-size: 14px; padding: 2px 4px; background: %1; border-bottom: 1px solid %2; }")
+            .arg(laneBg.name()).arg(borderColor.name()));
         if (!isChild) {
             QFont f = nameLabel->font();
             f.setBold(true);
@@ -1952,7 +1966,7 @@ QWidget* MainWindow::buildSwimlaneView()
             histLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
             histLabel->setFixedSize(histColWidth, rowHeight);
             histLabel->setCursor(Qt::PointingHandCursor);
-            histLabel->setStyleSheet(QString("QLabel { color: #007aff; font-size: 11px; padding: 2px 4px; background: %1; border-bottom: 1px solid %2; text-decoration: underline; }").arg(laneBg.name()).arg(borderColor.name()));
+            histLabel->setStyleSheet(QString("QLabel { color: #007aff; font-size: 14px; padding: 2px 4px; background: %1; border-bottom: 1px solid %2; text-decoration: underline; }").arg(laneBg.name()).arg(borderColor.name()));
             histLabel->setProperty("r2moPath", r2moPath);
             histLabel->setProperty("projectName", name);
             histLabel->installEventFilter(this);
@@ -1980,41 +1994,117 @@ QWidget* MainWindow::buildSwimlaneView()
 
     // Build rows for each vault
     for (const VaultSwimlaneData &vd : allVaultData) {
-        // AI Tools info row
-        QString aiToolsText;
-        int totalSessions = 0;
-        for (const AIToolInfo& tool : vd.aiTools) {
-            totalSessions += tool.sessions.count;
-        }
-        
-        if (!vd.aiTools.isEmpty()) {
-            aiToolsText = QString("🤖 %1 tools · %2 sessions").arg(vd.aiTools.size()).arg(totalSessions);
-        }
-        
-        // Vault header with Git status and AI info
+        // Vault header with Git status and AI info (no border)
         QWidget *vaultHeaderWidget = new QWidget();
         QHBoxLayout *vaultHeaderLayout = new QHBoxLayout(vaultHeaderWidget);
         vaultHeaderLayout->setContentsMargins(8, 4, 8, 4);
         vaultHeaderLayout->setSpacing(8);
-        vaultHeaderWidget->setStyleSheet(QString("QWidget { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e8f4ff, stop:0.5 #f0e8ff, stop:1 #fff8f0); border: 1px solid #007aff; border-radius: 6px; }"));
+        vaultHeaderWidget->setStyleSheet(QString("QWidget { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e8f4ff, stop:0.5 #f0e8ff, stop:1 #fff8f0); border: none; border-radius: 6px; }"));
         
-        // Vault name with Git status color
-        QString vaultNameText = QString("📁 %1").arg(vd.vaultName);
-        if (vd.gitStatus.isGitRepo) {
-            vaultNameText += QString(" [%1]").arg(vd.gitStatus.statusText());
-        }
-        QLabel *vaultNameLabel = new QLabel(vaultNameText);
-        vaultNameLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 13px; font-weight: 600; background: transparent; border: none; }").arg(vd.gitStatus.statusColor()));
+        // Left side: Vault name (larger font)
+        QLabel *vaultNameLabel = new QLabel(QString("📁 %1").arg(vd.vaultName));
+        vaultNameLabel->setStyleSheet("QLabel { color: #af52de; font-size: 14px; font-weight: 600; background: transparent; border: none; }");
         vaultHeaderLayout->addWidget(vaultNameLabel);
         
-        // AI Tools info
-        if (!aiToolsText.isEmpty()) {
-            QLabel *aiLabel = new QLabel(aiToolsText);
-            aiLabel->setStyleSheet("QLabel { color: #af52de; font-size: 11px; background: transparent; border: none; }");
-            vaultHeaderLayout->addWidget(aiLabel);
+        // AI Tools info - each tool with icon, name, and session count
+        for (const AIToolInfo& tool : vd.aiTools) {
+            QString iconPath;
+            QString displayName = tool.name;
+            if (tool.name.contains("Claude", Qt::CaseInsensitive)) iconPath = ":/ai-tools/claude.png";
+            else if (tool.name.contains("Codex", Qt::CaseInsensitive)) iconPath = ":/ai-tools/codex.png";
+            else if (tool.name.contains("OpenCode", Qt::CaseInsensitive)) iconPath = ":/ai-tools/opencode.png";
+            else if (tool.name.contains("Cursor", Qt::CaseInsensitive)) iconPath = ":/ai-tools/cursor.png";
+            else if (tool.name.contains("Cherry", Qt::CaseInsensitive)) iconPath = ":/ai-tools/cherry.png";
+            
+            QWidget *toolWidget = new QWidget();
+            QHBoxLayout *toolLayout = new QHBoxLayout(toolWidget);
+            toolLayout->setContentsMargins(0, 0, 0, 0);
+            toolLayout->setSpacing(4);
+            
+            // Try to load icon
+            bool hasIcon = false;
+            if (!iconPath.isEmpty()) {
+                QPixmap pixmap(iconPath);
+                hasIcon = !pixmap.isNull();
+                if (hasIcon) {
+                    QLabel *iconLabel = new QLabel();
+                    iconLabel->setPixmap(pixmap.scaled(16, 16, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    iconLabel->setStyleSheet("QLabel { background: transparent; border: none; }");
+                    toolLayout->addWidget(iconLabel);
+                }
+            }
+            
+            // Always show tool name
+            QLabel *nameLabel = new QLabel(displayName);
+            nameLabel->setStyleSheet("QLabel { color: #1d1d1f; font-size: 14px; background: transparent; border: none; font-weight: 500; }");
+            toolLayout->addWidget(nameLabel);
+            
+            // Session count
+            QLabel *countLabel = new QLabel(QString("(%1)").arg(tool.sessions.count));
+            countLabel->setStyleSheet("QLabel { color: #86868b; font-size: 12px; background: transparent; border: none; }");
+            toolLayout->addWidget(countLabel);
+            
+            vaultHeaderLayout->addWidget(toolWidget);
         }
         
         vaultHeaderLayout->addStretch();
+        
+        // Right side: Git status
+        if (vd.gitStatus.isGitRepo) {
+            QWidget *gitWidget = new QWidget();
+            QHBoxLayout *gitLayout = new QHBoxLayout(gitWidget);
+            gitLayout->setContentsMargins(0, 0, 0, 0);
+            gitLayout->setSpacing(6);
+            
+            // Check if has any changes (need star marker)
+            bool hasChanges = (vd.gitStatus.aheadCount > 0 || vd.gitStatus.behindCount > 0 ||
+                              vd.gitStatus.stagedCount > 0 || vd.gitStatus.modifiedCount > 0 || 
+                              vd.gitStatus.untrackedCount > 0);
+            
+            // Branch name with optional star marker
+            QString branchText = hasChanges ? QString("★ %1").arg(vd.gitStatus.branch) : vd.gitStatus.branch;
+            QLabel *branchLabel = new QLabel(branchText);
+            branchLabel->setStyleSheet("QLabel { color: #b8860b; font-size: 14px; background: transparent; border: none; font-weight: 600; }");
+            gitLayout->addWidget(branchLabel);
+            
+            // Only show markers if there are changes
+            if (hasChanges) {
+                QString markerStyle = "QLabel { font-size: 14px; background: transparent; border: none; font-weight: 600; }";
+                
+                if (vd.gitStatus.aheadCount > 0) {
+                    QLabel *aheadLabel = new QLabel(QString("↑%1").arg(vd.gitStatus.aheadCount));
+                    aheadLabel->setStyleSheet(QString("%1 color: #007aff; min-width: 28px; }").arg(markerStyle));
+                    gitLayout->addWidget(aheadLabel);
+                }
+                
+                if (vd.gitStatus.behindCount > 0) {
+                    QLabel *behindLabel = new QLabel(QString("↓%1").arg(vd.gitStatus.behindCount));
+                    behindLabel->setStyleSheet(QString("%1 color: #ff9500; min-width: 28px; }").arg(markerStyle));
+                    gitLayout->addWidget(behindLabel);
+                }
+                
+                if (vd.gitStatus.stagedCount > 0) {
+                    QLabel *stagedLabel = new QLabel(QString("!%1").arg(vd.gitStatus.stagedCount));
+                    stagedLabel->setStyleSheet(QString("%1 color: #34c759; min-width: 24px; }").arg(markerStyle));
+                    gitLayout->addWidget(stagedLabel);
+                }
+                
+                if (vd.gitStatus.modifiedCount > 0) {
+                    QLabel *modifiedLabel = new QLabel(QString("✗%1").arg(vd.gitStatus.modifiedCount));
+                    modifiedLabel->setStyleSheet(QString("%1 color: #ff3b30; min-width: 24px; }").arg(markerStyle));
+                    gitLayout->addWidget(modifiedLabel);
+                }
+                
+                if (vd.gitStatus.untrackedCount > 0) {
+                    QLabel *untrackedLabel = new QLabel(QString("?%1").arg(vd.gitStatus.untrackedCount));
+                    untrackedLabel->setStyleSheet(QString("%1 color: #86868b; min-width: 24px; }").arg(markerStyle));
+                    gitLayout->addWidget(untrackedLabel);
+                }
+            }
+            
+            vaultHeaderLayout->addWidget(gitWidget);
+        }
+        
         contentLayout->addWidget(vaultHeaderWidget);
 
         QWidget *gridWidget = new QWidget();
@@ -2027,21 +2117,21 @@ QWidget* MainWindow::buildSwimlaneView()
         QLabel *nameHeader = new QLabel(tr("Project"));
         nameHeader->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         nameHeader->setFixedHeight(24);
-        nameHeader->setStyleSheet(QString("QLabel { color: %1; font-size: 11px; font-weight: 600; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
+        nameHeader->setStyleSheet(QString("QLabel { color: %1; font-size: 14px; font-weight: 600; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
         grid->addWidget(nameHeader, 0, 0);
 
         QLabel *histHeader = new QLabel(tr("Hist."));
         histHeader->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         histHeader->setFixedSize(histColWidth, 24);
         histHeader->setToolTip(tr("Historical task count"));
-        histHeader->setStyleSheet(QString("QLabel { color: %1; font-size: 11px; font-weight: 600; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
+        histHeader->setStyleSheet(QString("QLabel { color: %1; font-size: 14px; font-weight: 600; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
         grid->addWidget(histHeader, 0, 1);
 
         for (int col = 0; col < gridColCount; ++col) {
             QLabel *colH = new QLabel(QString("#%1").arg(col + 1));
             colH->setAlignment(Qt::AlignCenter);
             colH->setFixedSize(cellWidth, 24);
-            colH->setStyleSheet(QString("QLabel { color: %1; font-size: 10px; font-weight: 600; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
+            colH->setStyleSheet(QString("QLabel { color: %1; font-size: 12px; font-weight: 600; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
             grid->addWidget(colH, 0, col + 2);
         }
 
@@ -2369,4 +2459,26 @@ bool MainWindow::addAIToolsToItem(QTreeWidgetItem* parentItem, const QList<AIToo
     }
 
     return hasAnyTools;
+}
+
+void MainWindow::onSwimlaneRefresh()
+{
+    // Only refresh if swimlane tab is visible
+    if (!m_swimlaneTabContent) {
+        return;
+    }
+    
+    int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
+    if (idx < 0 || m_mainTabWidget->currentIndex() != idx) {
+        return;
+    }
+    
+    // Rebuild swimlane view
+    QWidget *newWidget = buildSwimlaneView();
+    m_mainTabWidget->removeTab(idx);
+    m_swimlaneTabContent->deleteLater();
+    m_swimlaneTabContent = newWidget;
+    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+    m_mainTabWidget->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
+    m_mainTabWidget->setCurrentIndex(newIdx);
 }

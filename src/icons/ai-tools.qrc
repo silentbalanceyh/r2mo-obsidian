@@ -1,0 +1,10 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/ai-tools">
+        <file>ai-tools/claude.png</file>
+        <file>ai-tools/codex.png</file>
+        <file>ai-tools/cursor.png</file>
+        <file>ai-tools/cherry.png</file>
+        <file>ai-tools/opencode.png</file>
+    </qresource>
+</RCC>
