@@ -1885,8 +1885,41 @@ QWidget* MainWindow::buildSwimlaneView()
         GitScanner gitScanner;
         vd.gitStatus = gitScanner.scanRepository(vault.path);
         
+        // Scan AI tools from vault root + all sub-projects
         AIToolScanner aiScanner;
-        vd.aiTools = aiScanner.scanProject(vault.path);
+        QSet<QString> scannedTools;
+        QList<AIToolInfo> allAiTools;
+        
+        // Scan vault root
+        QList<AIToolInfo> rootTools = aiScanner.scanProject(vault.path);
+        for (const AIToolInfo& tool : rootTools) {
+            if (!scannedTools.contains(tool.name)) {
+                allAiTools.append(tool);
+                scannedTools.insert(tool.name);
+            }
+        }
+        
+        // Scan parent project
+        QList<AIToolInfo> parentTools = aiScanner.scanProject(parent->path);
+        for (const AIToolInfo& tool : parentTools) {
+            if (!scannedTools.contains(tool.name)) {
+                allAiTools.append(tool);
+                scannedTools.insert(tool.name);
+            }
+        }
+        
+        // Scan child projects
+        for (const R2moSubProject* child : children) {
+            QList<AIToolInfo> childTools = aiScanner.scanProject(child->path);
+            for (const AIToolInfo& tool : childTools) {
+                if (!scannedTools.contains(tool.name)) {
+                    allAiTools.append(tool);
+                    scannedTools.insert(tool.name);
+                }
+            }
+        }
+        
+        vd.aiTools = allAiTools;
 
         // Parent row
         VaultSwimlaneData::LaneRow parentRow;
@@ -1944,15 +1977,18 @@ QWidget* MainWindow::buildSwimlaneView()
                           int histCount, const QList<TaskInfo> &queueTasks,
                           const QString &r2moPath, bool isChild,
                           const GitStatusInfo &gitStatus) {
-        Q_UNUSED(gitStatus);
-        
-        // Name label — fixed width for alignment, red color only
+        // Name label — dark red if has changes, dark green if clean
         QString nameText = isChild ? QString("  └ %1").arg(name) : name;
         QLabel *nameLabel = new QLabel(nameText);
         nameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         nameLabel->setFixedSize(nameColWidth, rowHeight);
-        nameLabel->setStyleSheet(QString("QLabel { color: #ff3b30; font-size: 14px; padding: 2px 4px; background: %1; border-bottom: 1px solid %2; }")
-            .arg(laneBg.name()).arg(borderColor.name()));
+        bool hasChanges = (gitStatus.isGitRepo && 
+                          (gitStatus.aheadCount > 0 || gitStatus.behindCount > 0 ||
+                           gitStatus.stagedCount > 0 || gitStatus.modifiedCount > 0 || 
+                           gitStatus.untrackedCount > 0));
+        QString nameColor = hasChanges ? "#8b2500" : "#2e7d32";
+        nameLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 14px; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }")
+            .arg(nameColor).arg(laneBg.name()).arg(borderColor.name()));
         if (!isChild) {
             QFont f = nameLabel->font();
             f.setBold(true);
@@ -2006,101 +2042,78 @@ QWidget* MainWindow::buildSwimlaneView()
         vaultNameLabel->setStyleSheet("QLabel { color: #af52de; font-size: 14px; font-weight: 600; background: transparent; border: none; }");
         vaultHeaderLayout->addWidget(vaultNameLabel);
         
-        // AI Tools info - each tool with icon, name, and session count
+        // AI Tools info - icon + session count, hover shows tool name
         for (const AIToolInfo& tool : vd.aiTools) {
-            QString iconPath;
-            QString displayName = tool.name;
-            if (tool.name.contains("Claude", Qt::CaseInsensitive)) iconPath = ":/ai-tools/claude.png";
-            else if (tool.name.contains("Codex", Qt::CaseInsensitive)) iconPath = ":/ai-tools/codex.png";
-            else if (tool.name.contains("OpenCode", Qt::CaseInsensitive)) iconPath = ":/ai-tools/opencode.png";
-            else if (tool.name.contains("Cursor", Qt::CaseInsensitive)) iconPath = ":/ai-tools/cursor.png";
-            else if (tool.name.contains("Cherry", Qt::CaseInsensitive)) iconPath = ":/ai-tools/cherry.png";
-            
             QWidget *toolWidget = new QWidget();
             QHBoxLayout *toolLayout = new QHBoxLayout(toolWidget);
             toolLayout->setContentsMargins(0, 0, 0, 0);
             toolLayout->setSpacing(4);
             
-            // Try to load icon
-            bool hasIcon = false;
-            if (!iconPath.isEmpty()) {
-                QPixmap pixmap(iconPath);
-                hasIcon = !pixmap.isNull();
-                if (hasIcon) {
-                    QLabel *iconLabel = new QLabel();
+            // Icon from tool.iconPath (already set by scanner)
+            QLabel *iconLabel = new QLabel();
+            if (!tool.iconPath.isEmpty() && QFile::exists(tool.iconPath)) {
+                QPixmap pixmap(tool.iconPath);
+                if (!pixmap.isNull()) {
                     iconLabel->setPixmap(pixmap.scaled(16, 16, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-                    iconLabel->setStyleSheet("QLabel { background: transparent; border: none; }");
-                    toolLayout->addWidget(iconLabel);
                 }
             }
-            
-            // Always show tool name
-            QLabel *nameLabel = new QLabel(displayName);
-            nameLabel->setStyleSheet("QLabel { color: #1d1d1f; font-size: 14px; background: transparent; border: none; font-weight: 500; }");
-            toolLayout->addWidget(nameLabel);
+            iconLabel->setStyleSheet("QLabel { background: transparent; border: none; }");
+            toolLayout->addWidget(iconLabel);
             
             // Session count
-            QLabel *countLabel = new QLabel(QString("(%1)").arg(tool.sessions.count));
+            QLabel *countLabel = new QLabel(QString::number(tool.sessions.count));
             countLabel->setStyleSheet("QLabel { color: #86868b; font-size: 12px; background: transparent; border: none; }");
             toolLayout->addWidget(countLabel);
+            
+            // Hover tooltip
+            toolWidget->setToolTip(QString("%1: %2 sessions").arg(tool.name).arg(tool.sessions.count));
             
             vaultHeaderLayout->addWidget(toolWidget);
         }
         
         vaultHeaderLayout->addStretch();
         
-        // Right side: Git status
+        // Right side: Git status — always show all markers with different colors
         if (vd.gitStatus.isGitRepo) {
             QWidget *gitWidget = new QWidget();
             QHBoxLayout *gitLayout = new QHBoxLayout(gitWidget);
             gitLayout->setContentsMargins(0, 0, 0, 0);
             gitLayout->setSpacing(6);
             
-            // Check if has any changes (need star marker)
+            // Check if has any changes
             bool hasChanges = (vd.gitStatus.aheadCount > 0 || vd.gitStatus.behindCount > 0 ||
                               vd.gitStatus.stagedCount > 0 || vd.gitStatus.modifiedCount > 0 || 
                               vd.gitStatus.untrackedCount > 0);
             
-            // Branch name with optional star marker
+            // Branch name: green if synced, dark gold with ★ if has changes
             QString branchText = hasChanges ? QString("★ %1").arg(vd.gitStatus.branch) : vd.gitStatus.branch;
+            QString branchColor = hasChanges ? "#b8860b" : "#34c759";
             QLabel *branchLabel = new QLabel(branchText);
-            branchLabel->setStyleSheet("QLabel { color: #b8860b; font-size: 14px; background: transparent; border: none; font-weight: 600; }");
+            branchLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 14px; background: transparent; border: none; font-weight: 600; }").arg(branchColor));
             gitLayout->addWidget(branchLabel);
             
-            // Only show markers if there are changes
-            if (hasChanges) {
-                QString markerStyle = "QLabel { font-size: 14px; background: transparent; border: none; font-weight: 600; }";
-                
-                if (vd.gitStatus.aheadCount > 0) {
-                    QLabel *aheadLabel = new QLabel(QString("↑%1").arg(vd.gitStatus.aheadCount));
-                    aheadLabel->setStyleSheet(QString("%1 color: #007aff; min-width: 28px; }").arg(markerStyle));
-                    gitLayout->addWidget(aheadLabel);
-                }
-                
-                if (vd.gitStatus.behindCount > 0) {
-                    QLabel *behindLabel = new QLabel(QString("↓%1").arg(vd.gitStatus.behindCount));
-                    behindLabel->setStyleSheet(QString("%1 color: #ff9500; min-width: 28px; }").arg(markerStyle));
-                    gitLayout->addWidget(behindLabel);
-                }
-                
-                if (vd.gitStatus.stagedCount > 0) {
-                    QLabel *stagedLabel = new QLabel(QString("!%1").arg(vd.gitStatus.stagedCount));
-                    stagedLabel->setStyleSheet(QString("%1 color: #34c759; min-width: 24px; }").arg(markerStyle));
-                    gitLayout->addWidget(stagedLabel);
-                }
-                
-                if (vd.gitStatus.modifiedCount > 0) {
-                    QLabel *modifiedLabel = new QLabel(QString("✗%1").arg(vd.gitStatus.modifiedCount));
-                    modifiedLabel->setStyleSheet(QString("%1 color: #ff3b30; min-width: 24px; }").arg(markerStyle));
-                    gitLayout->addWidget(modifiedLabel);
-                }
-                
-                if (vd.gitStatus.untrackedCount > 0) {
-                    QLabel *untrackedLabel = new QLabel(QString("?%1").arg(vd.gitStatus.untrackedCount));
-                    untrackedLabel->setStyleSheet(QString("%1 color: #86868b; min-width: 24px; }").arg(markerStyle));
-                    gitLayout->addWidget(untrackedLabel);
-                }
-            }
+            // Always show all markers with fixed width (even if 0)
+            QString markerBase = "QLabel { font-size: 14px; background: transparent; border: none; font-weight: 600; ";
+            
+            QLabel *aheadLabel = new QLabel(QString("↑%1").arg(vd.gitStatus.aheadCount));
+            aheadLabel->setStyleSheet(markerBase + "color: #007aff; min-width: 28px; }");
+            gitLayout->addWidget(aheadLabel);
+            
+            QLabel *behindLabel = new QLabel(QString("↓%1").arg(vd.gitStatus.behindCount));
+            behindLabel->setStyleSheet(markerBase + "color: #ff9500; min-width: 28px; }");
+            gitLayout->addWidget(behindLabel);
+            
+            QLabel *stagedLabel = new QLabel(QString("!%1").arg(vd.gitStatus.stagedCount));
+            stagedLabel->setStyleSheet(markerBase + "color: #34c759; min-width: 24px; }");
+            gitLayout->addWidget(stagedLabel);
+            
+            QLabel *modifiedLabel = new QLabel(QString("✗%1").arg(vd.gitStatus.modifiedCount));
+            modifiedLabel->setStyleSheet(markerBase + "color: #ff3b30; min-width: 24px; }");
+            gitLayout->addWidget(modifiedLabel);
+            
+            QLabel *untrackedLabel = new QLabel(QString("?%1").arg(vd.gitStatus.untrackedCount));
+            untrackedLabel->setStyleSheet(markerBase + "color: #86868b; min-width: 24px; }");
+            gitLayout->addWidget(untrackedLabel);
             
             vaultHeaderLayout->addWidget(gitWidget);
         }
