@@ -15,9 +15,9 @@ endif()
 option(BUILD_TRANSLATIONS "Build Qt translation files" ON)
 
 if(BUILD_TRANSLATIONS)
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql LinguistTools)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql Concurrent LinguistTools)
 else()
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql Concurrent)
 endif()
 
 # Source files - Modular structure
@@ -83,6 +83,7 @@ target_link_libraries(ObsidianManager PRIVATE
     Qt6::Core
     Qt6::Widgets
     Qt6::Sql
+    Qt6::Concurrent
 )
 
 # Include directories

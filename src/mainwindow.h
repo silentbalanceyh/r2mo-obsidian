@@ -17,14 +17,40 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QTimer>
+#include <QFutureWatcher>
 #include "theme/thememanager.h"
+#include "utils/gitscanner.h"
+#include "utils/aitoolscanner.h"
+#include "utils/r2moscanner.h"
 
 // Forward declarations
 class VaultModel;
 class SettingsManager;
 class VaultValidator;
-struct R2moSubProject;
-struct AIToolInfo;
+struct Vault;
+
+struct SwimlaneVaultData {
+    QString vaultName;
+    QString vaultPath;
+    GitStatusInfo gitStatus;
+    QList<AIToolInfo> aiTools;
+    struct LaneRow {
+        QString name;
+        QString projectPath;
+        QString r2moPath;
+        int historicalCount;
+        QList<TaskInfo> queueTasks;
+        bool isParent;
+        GitStatusInfo gitStatus;
+        QList<LaneRow> children;
+    };
+    QList<LaneRow> rows;
+};
+
+struct SwimlaneScanData {
+    QList<SwimlaneVaultData> vaults;
+    int globalMaxQueue;
+};
 
 class MainWindow : public QMainWindow
 {
@@ -82,6 +108,10 @@ private:
     void updateLanguageButtons();
     void updateThemeToggleIcon();
     void openSwimlaneTab();
+    void addSwimlaneCloseButton(int tabIndex);
+    void refreshSwimlaneAsync();
+    SwimlaneScanData collectSwimlaneData();
+    QWidget* buildSwimlaneView(const SwimlaneScanData& data);
     QWidget* buildSwimlaneView();
 
     // Toolbar
@@ -134,6 +164,11 @@ private:
     QWidget *m_swimlaneView;
     QWidget *m_cachedSwimlaneWidget;
     QTimer *m_swimlaneRefreshTimer;
+    QFutureWatcher<SwimlaneScanData> *m_swimlaneScanWatcher;
+    bool m_swimlaneRefreshing;
+    QTimer *m_loadingProgressTimer;
+    QLabel *m_loadingProgressLabel;
+    int m_loadingProgressStep;
     QString m_currentPreviewPath;
 
     // Modules (not owned)

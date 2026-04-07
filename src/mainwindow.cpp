@@ -44,6 +44,8 @@
 #include <QSpacerItem>
 #include <QStatusBar>
 #include <QPixmap>
+#include <QToolButton>
+#include <QtConcurrent>
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
@@ -89,6 +91,11 @@ MainWindow::MainWindow(QWidget *parent)
      , m_swimlaneView(nullptr)
      , m_cachedSwimlaneWidget(nullptr)
      , m_swimlaneRefreshTimer(nullptr)
+     , m_swimlaneScanWatcher(nullptr)
+     , m_swimlaneRefreshing(false)
+     , m_loadingProgressTimer(nullptr)
+     , m_loadingProgressLabel(nullptr)
+     , m_loadingProgressStep(0)
      , m_vaultModel(nullptr)
      , m_settingsManager(nullptr)
      , m_vaultValidator(nullptr)
@@ -617,7 +624,7 @@ void MainWindow::setupCentralWidget()
     // Create main tab widget to hold HOME and Swimlane views
     m_mainTabWidget = new QTabWidget;
     m_mainTabWidget->setObjectName("mainTabs");
-    m_mainTabWidget->setTabsClosable(true);
+    m_mainTabWidget->setTabsClosable(false);
     m_mainTabWidget->setStyleSheet(
         "QTabWidget#mainTabs { background: transparent; border: none; }"
         "QTabWidget#mainTabs::pane { border: none; background: transparent; }"
@@ -625,14 +632,11 @@ void MainWindow::setupCentralWidget()
         "QTabWidget#mainTabs QTabBar::tab { padding: 6px 16px; margin-right: 2px; background: #f0f0f0; border: 1px solid #d0d0d0; border-bottom: none; border-radius: 4px 4px 0 0; }"
         "QTabWidget#mainTabs QTabBar::tab:selected { background: white; color: #007aff; border-color: #007aff; }"
         "QTabWidget#mainTabs QTabBar::tab:!selected { background: #e8e8e8; color: #666; }"
-        "QTabBar::close-button { subcontrol-position: right; margin: 2px; }"
+        "QTabWidget#mainTabs QTabBar::close-button { width: 14px; height: 14px; subcontrol-position: right; }"
     );
     m_homeTabContent = homeTabContent;
     m_mainTabWidget->addTab(m_homeTabContent, tr("🏠 HOME"));
-    // HOME tab is not closable
-    m_mainTabWidget->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
     
-    // No swimlane tab initially — opened by button, closable
     m_swimlaneTabContent = nullptr;
     
     mainLayout->addWidget(m_mainTabWidget, 1);
@@ -657,26 +661,55 @@ void MainWindow::setupConnections()
             this, &MainWindow::onLanguageChanged);
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &MainWindow::onThemeChanged);
-    // Keep preview inner tabs fixed (non-closeable)
-    // Main tab close: allow closing swimlane tab (index > 0)
-    connect(m_mainTabWidget, &QTabWidget::tabCloseRequested, this, [this](int index) {
-        if (index > 0) {
-            QWidget *w = m_mainTabWidget->widget(index);
-            m_mainTabWidget->removeTab(index);
-            if (w == m_swimlaneTabContent) {
-                m_swimlaneTabContent->deleteLater();
-                m_swimlaneTabContent = nullptr;
-                if (m_swimlaneRefreshTimer) {
-                    m_swimlaneRefreshTimer->stop();
-                }
-            }
+    // Swimlane refresh timer (10 seconds)
+    m_swimlaneRefreshTimer = new QTimer(this);
+    m_swimlaneRefreshTimer->setInterval(10000);
+    connect(m_swimlaneRefreshTimer, &QTimer::timeout, this, &MainWindow::onSwimlaneRefresh);
+    
+    // Loading progress animation timer
+    m_loadingProgressTimer = new QTimer(this);
+    m_loadingProgressTimer->setInterval(300);
+    connect(m_loadingProgressTimer, &QTimer::timeout, this, [this]() {
+        if (m_loadingProgressLabel) {
+            m_loadingProgressStep = (m_loadingProgressStep + 1) % 4;
+            QString dots = QString(".").repeated(m_loadingProgressStep + 1);
+            static const QStringList steps = {
+                QT_TR_NOOP("Scanning Git repositories"),
+                QT_TR_NOOP("Scanning AI tools"),
+                QT_TR_NOOP("Loading task queues"),
+                QT_TR_NOOP("Building swimlane view")
+            };
+            QString stepText = tr(steps[m_loadingProgressStep % steps.size()].toUtf8().constData());
+            m_loadingProgressLabel->setText(QString("%1%2").arg(stepText, dots));
         }
     });
     
-    // Swimlane refresh timer (30 seconds)
-    m_swimlaneRefreshTimer = new QTimer(this);
-    m_swimlaneRefreshTimer->setInterval(30000);
-    connect(m_swimlaneRefreshTimer, &QTimer::timeout, this, &MainWindow::onSwimlaneRefresh);
+    // Swimlane scan watcher for async refresh
+    m_swimlaneScanWatcher = new QFutureWatcher<SwimlaneScanData>(this);
+    connect(m_swimlaneScanWatcher, &QFutureWatcher<SwimlaneScanData>::finished, this, [this]() {
+        if (m_swimlaneRefreshing) {
+            m_loadingProgressTimer->stop();
+            m_loadingProgressStep = 0;
+            
+            SwimlaneScanData data = m_swimlaneScanWatcher->result();
+            QWidget *newWidget = buildSwimlaneView(data);
+            m_cachedSwimlaneWidget = newWidget;
+            
+            if (m_swimlaneTabContent && m_mainTabWidget->indexOf(m_swimlaneTabContent) >= 0) {
+                int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
+                bool isVisible = (m_mainTabWidget->currentIndex() == idx);
+                
+                if (isVisible) {
+                    m_mainTabWidget->removeTab(idx);
+                    m_swimlaneTabContent = newWidget;
+                    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+                    addSwimlaneCloseButton(newIdx);
+                    m_mainTabWidget->setCurrentIndex(newIdx);
+                }
+            }
+            m_swimlaneRefreshing = false;
+        }
+    });
 }
 
 void MainWindow::updateVaultList()
@@ -1774,26 +1807,58 @@ void MainWindow::onThemeToggle()
     m_settingsManager->setTheme(static_cast<int>(newTheme));
 }
 
+void MainWindow::addSwimlaneCloseButton(int tabIndex)
+{
+    QToolButton *closeBtn = new QToolButton();
+    closeBtn->setText("×");
+    closeBtn->setFixedSize(QSize(14, 14));
+    closeBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    closeBtn->setCursor(Qt::PointingHandCursor);
+    closeBtn->setStyleSheet("QToolButton { background: transparent; color: #86868b; font-size: 12px; font-weight: bold; border: none; padding: 0; margin: 0; margin-right: 4px; } QToolButton:hover { background: #ff3b30; color: white; border-radius: 2px; }");
+    connect(closeBtn, &QToolButton::clicked, this, [this]() {
+        int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
+        if (idx > 0) {
+            m_mainTabWidget->removeTab(idx);
+            m_cachedSwimlaneWidget = m_swimlaneTabContent;
+            m_swimlaneTabContent = nullptr;
+        }
+    });
+    m_mainTabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeBtn);
+}
+
 void MainWindow::onSwimlane()
 {
-    // If swimlane tab already exists, just switch to it
-    if (m_swimlaneTabContent) {
-        int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
-        if (idx >= 0) {
-            m_mainTabWidget->setCurrentIndex(idx);
-            return;
-        }
+    if (m_cachedSwimlaneWidget) {
+        m_swimlaneTabContent = m_cachedSwimlaneWidget;
+        int idx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+        addSwimlaneCloseButton(idx);
+        m_mainTabWidget->setCurrentIndex(idx);
+        return;
     }
 
-    // Build and add swimlane tab
-    m_mainTabWidget->setTabsClosable(true);
-    m_swimlaneTabContent = buildSwimlaneView();
+    if (m_swimlaneRefreshing) return;
+    m_swimlaneRefreshing = true;
+
+    QWidget *loadingWidget = new QWidget();
+    loadingWidget->setStyleSheet("background: white;");
+    QVBoxLayout *loadingLayout = new QVBoxLayout(loadingWidget);
+    loadingLayout->setAlignment(Qt::AlignCenter);
+    
+    QLabel *loadingLabel = new QLabel(tr("⏳ Loading swimlane..."));
+    loadingLabel->setAlignment(Qt::AlignCenter);
+    loadingLabel->setStyleSheet("QLabel { color: #86868b; font-size: 16px; padding: 40px; }");
+    loadingLayout->addWidget(loadingLabel);
+    
+    m_swimlaneTabContent = loadingWidget;
     int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
-    // HOME tab remains non-closeable
-    m_mainTabWidget->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
+    addSwimlaneCloseButton(newIdx);
     m_mainTabWidget->setCurrentIndex(newIdx);
     
-    // Start refresh timer
+    QFuture<SwimlaneScanData> future = QtConcurrent::run([this]() {
+        return this->collectSwimlaneData();
+    });
+    m_swimlaneScanWatcher->setFuture(future);
+    
     if (m_swimlaneRefreshTimer) {
         m_swimlaneRefreshTimer->start();
     }
@@ -1801,66 +1866,65 @@ void MainWindow::onSwimlane()
 
 QWidget* MainWindow::buildSwimlaneView()
 {
-    QWidget *container = new QWidget();
-    container->setStyleSheet("background: white;");
-    QVBoxLayout *mainLayout = new QVBoxLayout(container);
-    mainLayout->setContentsMargins(16, 12, 16, 12);
-    mainLayout->setSpacing(8);
+    SwimlaneScanData data = collectSwimlaneData();
+    return buildSwimlaneView(data);
+}
 
+SwimlaneScanData MainWindow::collectSwimlaneData()
+{
+    SwimlaneScanData result;
+    result.globalMaxQueue = 0;
+    
     QList<Vault> vaults = m_vaultModel->vaults();
-    if (vaults.isEmpty()) {
-        QLabel *emptyLabel = new QLabel(tr("No vaults added. Add a vault to see swimlane view."));
-        emptyLabel->setAlignment(Qt::AlignCenter);
-        emptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 40px; background: white; }");
-        mainLayout->addWidget(emptyLabel);
-        return container;
-    }
-
-    // Legend
-    QLabel *legendLabel = new QLabel(tr("🟠 Running Tasks"));
-    legendLabel->setStyleSheet("QLabel { color: #86868b; font-size: 11px; background: white; }");
-    mainLayout->addWidget(legendLabel);
-
-    // Scrollable tree-style swimlane
-    QScrollArea *scrollArea = new QScrollArea();
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setStyleSheet("QScrollArea { border: 1px solid #e0e0e0; background: white; border-radius: 4px; }");
-
-    QWidget *swimlaneContent = new QWidget();
-    swimlaneContent->setStyleSheet("background: white;");
-    QVBoxLayout *contentLayout = new QVBoxLayout(swimlaneContent);
-    contentLayout->setContentsMargins(0, 0, 0, 0);
-    contentLayout->setSpacing(0);
-
-    // Colors
-    QColor borderColor("#e0e0e0");
-    QColor textColor("#333333");
-    QColor headerBg("#f5f5f7");
-    QColor laneBg("#ffffff");
-    QColor pendingColor("#ff9500");
-    QColor emptyColor("#f0f0f0");
-
-    // Collect max queue count across ALL vaults for uniform column width
-    int globalMaxQueue = 0;
-    struct VaultSwimlaneData {
-        QString vaultName;
-        QString vaultPath;
-        GitStatusInfo gitStatus;
-        QList<AIToolInfo> aiTools;
-        struct LaneRow {
-            QString name;
-            QString projectPath;
-            QString r2moPath;
-            int historicalCount;
-            QList<TaskInfo> queueTasks;
-            bool isParent;
-            GitStatusInfo gitStatus;
-            QList<LaneRow> children;
-        };
-        QList<LaneRow> rows;
+    
+    // Cache Git scan results by actual repo path to avoid duplicate scans
+    QMap<QString, GitStatusInfo> gitCache;
+    
+    auto getCachedGitStatus = [&](const QString& path) -> GitStatusInfo {
+        // Find actual git repo root
+        QString actualRepoPath = path;
+        QDir dir(path);
+        if (!dir.exists()) {
+            GitStatusInfo empty;
+            empty.isGitRepo = false;
+            return empty;
+        }
+        
+        QString gitDir = path + "/.git";
+        if (!QDir(gitDir).exists()) {
+            QDir checkDir(path);
+            while (checkDir.cdUp()) {
+                if (QDir(checkDir.path() + "/.git").exists()) {
+                    actualRepoPath = checkDir.path();
+                    break;
+                }
+                if (checkDir.isRoot()) break;
+            }
+        }
+        
+        if (gitCache.contains(actualRepoPath)) {
+            return gitCache[actualRepoPath];
+        }
+        
+        GitScanner gitScanner;
+        GitStatusInfo status = gitScanner.scanRepository(path);
+        gitCache[actualRepoPath] = status;
+        return status;
     };
-    QList<VaultSwimlaneData> allVaultData;
-
+    
+    // Cache AI tool scan results by project path
+    QMap<QString, QList<AIToolInfo>> aiCache;
+    
+    auto getCachedAITools = [&](const QString& path) -> QList<AIToolInfo> {
+        if (aiCache.contains(path)) {
+            return aiCache[path];
+        }
+        AIToolScanner aiScanner;
+        QList<AIToolInfo> tools = aiScanner.scanProject(path);
+        aiCache[path] = tools;
+        return tools;
+    };
+    
     for (const Vault& vault : vaults) {
         QDir vaultDir(vault.path);
         if (!vaultDir.exists() || !m_vaultValidator->hasR2moConfig(vault.path)) {
@@ -1878,20 +1942,16 @@ QWidget* MainWindow::buildSwimlaneView()
         }
         if (!parent) continue;
 
-        VaultSwimlaneData vd;
+        SwimlaneVaultData vd;
         vd.vaultName = vault.name;
         vd.vaultPath = vault.path;
         
-        GitScanner gitScanner;
-        vd.gitStatus = gitScanner.scanRepository(vault.path);
+        vd.gitStatus = getCachedGitStatus(vault.path);
         
-        // Scan AI tools from vault root + all sub-projects
-        AIToolScanner aiScanner;
         QSet<QString> scannedTools;
         QList<AIToolInfo> allAiTools;
         
-        // Scan vault root
-        QList<AIToolInfo> rootTools = aiScanner.scanProject(vault.path);
+        QList<AIToolInfo> rootTools = getCachedAITools(vault.path);
         for (const AIToolInfo& tool : rootTools) {
             if (!scannedTools.contains(tool.name)) {
                 allAiTools.append(tool);
@@ -1899,8 +1959,7 @@ QWidget* MainWindow::buildSwimlaneView()
             }
         }
         
-        // Scan parent project
-        QList<AIToolInfo> parentTools = aiScanner.scanProject(parent->path);
+        QList<AIToolInfo> parentTools = getCachedAITools(parent->path);
         for (const AIToolInfo& tool : parentTools) {
             if (!scannedTools.contains(tool.name)) {
                 allAiTools.append(tool);
@@ -1908,9 +1967,8 @@ QWidget* MainWindow::buildSwimlaneView()
             }
         }
         
-        // Scan child projects
         for (const R2moSubProject* child : children) {
-            QList<AIToolInfo> childTools = aiScanner.scanProject(child->path);
+            QList<AIToolInfo> childTools = getCachedAITools(child->path);
             for (const AIToolInfo& tool : childTools) {
                 if (!scannedTools.contains(tool.name)) {
                     allAiTools.append(tool);
@@ -1921,35 +1979,86 @@ QWidget* MainWindow::buildSwimlaneView()
         
         vd.aiTools = allAiTools;
 
-        // Parent row
-        VaultSwimlaneData::LaneRow parentRow;
+        SwimlaneVaultData::LaneRow parentRow;
         parentRow.name = parent->name;
         parentRow.projectPath = parent->path;
         parentRow.isParent = true;
         parentRow.r2moPath = parent->path + "/.r2mo";
         parentRow.historicalCount = scanner.getHistoricalTasks(parent->path + "/.r2mo").size();
         parentRow.queueTasks = scanner.getTaskQueueFiles(parent->path + "/.r2mo");
-        parentRow.gitStatus = gitScanner.scanRepository(parent->path);
-        if (parentRow.queueTasks.size() > globalMaxQueue)
-            globalMaxQueue = parentRow.queueTasks.size();
+        parentRow.gitStatus = getCachedGitStatus(parent->path);
+        if (parentRow.queueTasks.size() > result.globalMaxQueue)
+            result.globalMaxQueue = parentRow.queueTasks.size();
 
-        // Children
         for (const R2moSubProject* child : children) {
-            VaultSwimlaneData::LaneRow childRow;
+            SwimlaneVaultData::LaneRow childRow;
             childRow.name = child->name;
             childRow.projectPath = child->path;
             childRow.isParent = false;
             childRow.r2moPath = child->path + "/.r2mo";
             childRow.historicalCount = scanner.getHistoricalTasks(child->path + "/.r2mo").size();
             childRow.queueTasks = scanner.getTaskQueueFiles(child->path + "/.r2mo");
-            childRow.gitStatus = gitScanner.scanRepository(child->path);
-            if (childRow.queueTasks.size() > globalMaxQueue)
-                globalMaxQueue = childRow.queueTasks.size();
+            childRow.gitStatus = getCachedGitStatus(child->path);
+            if (childRow.queueTasks.size() > result.globalMaxQueue)
+                result.globalMaxQueue = childRow.queueTasks.size();
             parentRow.children.append(childRow);
         }
         vd.rows.append(parentRow);
-        allVaultData.append(vd);
+        result.vaults.append(vd);
     }
+    
+    return result;
+}
+
+QWidget* MainWindow::buildSwimlaneView(const SwimlaneScanData& scanData)
+{
+    QWidget *container = new QWidget();
+    container->setStyleSheet("background: white;");
+    QVBoxLayout *mainLayout = new QVBoxLayout(container);
+    mainLayout->setContentsMargins(16, 12, 16, 12);
+    mainLayout->setSpacing(8);
+
+    QList<Vault> vaults = m_vaultModel->vaults();
+    if (vaults.isEmpty()) {
+        QLabel *emptyLabel = new QLabel(tr("No vaults added. Add a vault to see swimlane view."));
+        emptyLabel->setAlignment(Qt::AlignCenter);
+        emptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 40px; background: white; }");
+        mainLayout->addWidget(emptyLabel);
+        return container;
+    }
+
+    // Legend + Refresh button
+    QHBoxLayout *legendLayout = new QHBoxLayout();
+    QLabel *legendLabel = new QLabel(tr("🟠 Running Tasks"));
+    legendLabel->setStyleSheet("QLabel { color: #86868b; font-size: 11px; background: white; }");
+    legendLayout->addWidget(legendLabel);
+    
+    QPushButton *refreshBtn = new QPushButton(tr("🔄 Refresh"));
+    refreshBtn->setFixedSize(QSize(80, 24));
+    refreshBtn->setCursor(Qt::PointingHandCursor);
+    refreshBtn->setStyleSheet("QPushButton { background: #f5f5f7; color: #86868b; font-size: 11px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 2px 8px; } QPushButton:hover { background: #e8e8ed; color: #333; } QPushButton:disabled { background: #f5f5f7; color: #c0c0c0; }");
+    refreshBtn->setProperty("isRefreshBtn", true);
+    legendLayout->addWidget(refreshBtn);
+    legendLayout->addStretch();
+    mainLayout->addLayout(legendLayout);
+
+    QScrollArea *scrollArea = new QScrollArea();
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setStyleSheet("QScrollArea { border: 1px solid #e0e0e0; background: white; border-radius: 4px; }");
+
+    QWidget *swimlaneContent = new QWidget();
+    swimlaneContent->setStyleSheet("background: white;");
+    QVBoxLayout *contentLayout = new QVBoxLayout(swimlaneContent);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(0);
+
+    QColor borderColor("#e0e0e0");
+    QColor textColor("#333333");
+    QColor headerBg("#f5f5f7");
+    QColor laneBg("#ffffff");
+
+    const QList<SwimlaneVaultData>& allVaultData = scanData.vaults;
+    int globalMaxQueue = scanData.globalMaxQueue;
 
     if (allVaultData.isEmpty()) {
         QLabel *noDataLabel = new QLabel(tr("No R2MO projects found in any vault."));
@@ -1958,6 +2067,11 @@ QWidget* MainWindow::buildSwimlaneView()
         contentLayout->addWidget(noDataLabel);
         scrollArea->setWidget(swimlaneContent);
         mainLayout->addWidget(scrollArea, 1);
+        
+        QPushButton *btn = container->findChild<QPushButton*>("", Qt::FindDirectChildrenOnly);
+        if (btn && btn->property("isRefreshBtn").toBool()) {
+            connect(btn, &QPushButton::clicked, this, &MainWindow::refreshSwimlaneAsync);
+        }
         return container;
     }
 
@@ -1968,16 +2082,13 @@ QWidget* MainWindow::buildSwimlaneView()
     int rowHeight = 28;
     int gridColCount = qMax(1, globalMaxQueue);
 
-    // Colors
-    QColor runningColor("#007aff");   // Blue for running tasks
-    QColor emptyBorder("#d0d0d0");    // Gray border for empty slots
+    QColor runningColor("#007aff");
+    QColor emptyBorder("#d0d0d0");
 
-    // Helper lambda to add one lane row
     auto addLaneRow = [&](QGridLayout *grid, int row, const QString &name,
                           int histCount, const QList<TaskInfo> &queueTasks,
                           const QString &r2moPath, bool isChild,
                           const GitStatusInfo &gitStatus) {
-        // Name label — dark red if has changes, dark green if clean
         QString nameText = isChild ? QString("  └ %1").arg(name) : name;
         QLabel *nameLabel = new QLabel(nameText);
         nameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -1996,7 +2107,6 @@ QWidget* MainWindow::buildSwimlaneView()
         }
         grid->addWidget(nameLabel, row, 0);
 
-        // Historical count — only show if > 0, clickable
         if (histCount > 0) {
             QLabel *histLabel = new QLabel(QString::number(histCount));
             histLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -2014,7 +2124,6 @@ QWidget* MainWindow::buildSwimlaneView()
             grid->addWidget(emptyHist, row, 1);
         }
 
-        // Queue cells — running tasks in blue, empty slots with gray border
         for (int col = 0; col < gridColCount; ++col) {
             QFrame *cell = new QFrame();
             cell->setFixedSize(cellWidth, cellHeight);
@@ -2028,28 +2137,23 @@ QWidget* MainWindow::buildSwimlaneView()
         }
     };
 
-    // Build rows for each vault
-    for (const VaultSwimlaneData &vd : allVaultData) {
-        // Vault header with Git status and AI info (no border)
+    for (const SwimlaneVaultData &vd : allVaultData) {
         QWidget *vaultHeaderWidget = new QWidget();
         QHBoxLayout *vaultHeaderLayout = new QHBoxLayout(vaultHeaderWidget);
         vaultHeaderLayout->setContentsMargins(8, 4, 8, 4);
         vaultHeaderLayout->setSpacing(8);
         vaultHeaderWidget->setStyleSheet(QString("QWidget { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e8f4ff, stop:0.5 #f0e8ff, stop:1 #fff8f0); border: none; border-radius: 6px; }"));
         
-        // Left side: Vault name (larger font)
         QLabel *vaultNameLabel = new QLabel(QString("📁 %1").arg(vd.vaultName));
         vaultNameLabel->setStyleSheet("QLabel { color: #af52de; font-size: 14px; font-weight: 600; background: transparent; border: none; }");
         vaultHeaderLayout->addWidget(vaultNameLabel);
         
-        // AI Tools info - icon + session count, hover shows tool name
         for (const AIToolInfo& tool : vd.aiTools) {
             QWidget *toolWidget = new QWidget();
             QHBoxLayout *toolLayout = new QHBoxLayout(toolWidget);
             toolLayout->setContentsMargins(0, 0, 0, 0);
             toolLayout->setSpacing(4);
             
-            // Icon from tool.iconPath (already set by scanner)
             QLabel *iconLabel = new QLabel();
             if (!tool.iconPath.isEmpty() && QFile::exists(tool.iconPath)) {
                 QPixmap pixmap(tool.iconPath);
@@ -2060,12 +2164,10 @@ QWidget* MainWindow::buildSwimlaneView()
             iconLabel->setStyleSheet("QLabel { background: transparent; border: none; }");
             toolLayout->addWidget(iconLabel);
             
-            // Session count
             QLabel *countLabel = new QLabel(QString::number(tool.sessions.count));
             countLabel->setStyleSheet("QLabel { color: #86868b; font-size: 12px; background: transparent; border: none; }");
             toolLayout->addWidget(countLabel);
             
-            // Hover tooltip
             toolWidget->setToolTip(QString("%1: %2 sessions").arg(tool.name).arg(tool.sessions.count));
             
             vaultHeaderLayout->addWidget(toolWidget);
@@ -2073,26 +2175,22 @@ QWidget* MainWindow::buildSwimlaneView()
         
         vaultHeaderLayout->addStretch();
         
-        // Right side: Git status — always show all markers with different colors
         if (vd.gitStatus.isGitRepo) {
             QWidget *gitWidget = new QWidget();
             QHBoxLayout *gitLayout = new QHBoxLayout(gitWidget);
             gitLayout->setContentsMargins(0, 0, 0, 0);
             gitLayout->setSpacing(6);
             
-            // Check if has any changes
             bool hasChanges = (vd.gitStatus.aheadCount > 0 || vd.gitStatus.behindCount > 0 ||
                               vd.gitStatus.stagedCount > 0 || vd.gitStatus.modifiedCount > 0 || 
                               vd.gitStatus.untrackedCount > 0);
             
-            // Branch name: green if synced, dark gold with ★ if has changes
             QString branchText = hasChanges ? QString("★ %1").arg(vd.gitStatus.branch) : vd.gitStatus.branch;
             QString branchColor = hasChanges ? "#b8860b" : "#34c759";
             QLabel *branchLabel = new QLabel(branchText);
             branchLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 14px; background: transparent; border: none; font-weight: 600; }").arg(branchColor));
             gitLayout->addWidget(branchLabel);
             
-            // Always show all markers with fixed width (even if 0)
             QString markerBase = "QLabel { font-size: 14px; background: transparent; border: none; font-weight: 600; ";
             
             QLabel *aheadLabel = new QLabel(QString("↑%1").arg(vd.gitStatus.aheadCount));
@@ -2126,7 +2224,6 @@ QWidget* MainWindow::buildSwimlaneView()
         grid->setContentsMargins(0, 0, 0, 0);
         grid->setSpacing(0);
 
-        // Column headers
         QLabel *nameHeader = new QLabel(tr("Project"));
         nameHeader->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         nameHeader->setFixedHeight(24);
@@ -2148,15 +2245,12 @@ QWidget* MainWindow::buildSwimlaneView()
             grid->addWidget(colH, 0, col + 2);
         }
 
-        // Spacer column to push everything left
         grid->setColumnStretch(gridColCount + 2, 1);
 
         int rowIdx = 1;
-        for (const VaultSwimlaneData::LaneRow &parentRow : vd.rows) {
-            // Parent project row
+        for (const SwimlaneVaultData::LaneRow &parentRow : vd.rows) {
             addLaneRow(grid, rowIdx++, parentRow.name, parentRow.historicalCount, parentRow.queueTasks, parentRow.r2moPath, false, parentRow.gitStatus);
-            // Child rows
-            for (const VaultSwimlaneData::LaneRow &childRow : parentRow.children) {
+            for (const SwimlaneVaultData::LaneRow &childRow : parentRow.children) {
                 addLaneRow(grid, rowIdx++, childRow.name, childRow.historicalCount, childRow.queueTasks, childRow.r2moPath, true, childRow.gitStatus);
             }
         }
@@ -2169,7 +2263,44 @@ QWidget* MainWindow::buildSwimlaneView()
     scrollArea->setWidget(swimlaneContent);
     mainLayout->addWidget(scrollArea, 1);
 
+    QPushButton *btn = container->findChild<QPushButton*>("", Qt::FindDirectChildrenOnly);
+    if (btn && btn->property("isRefreshBtn").toBool()) {
+        connect(btn, &QPushButton::clicked, this, &MainWindow::refreshSwimlaneAsync);
+    }
+
     return container;
+}
+
+void MainWindow::refreshSwimlaneAsync()
+{
+    if (m_swimlaneRefreshing) return;
+    if (!m_swimlaneTabContent) return;
+    
+    int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
+    if (idx < 0) return;
+    
+    m_swimlaneRefreshing = true;
+    
+    QWidget *loadingOverlay = new QWidget();
+    loadingOverlay->setStyleSheet("background: rgba(255, 255, 255, 0.9);");
+    QVBoxLayout *overlayLayout = new QVBoxLayout(loadingOverlay);
+    overlayLayout->setAlignment(Qt::AlignCenter);
+    QLabel *loadingLabel = new QLabel(tr("⏳ Refreshing..."));
+    loadingLabel->setAlignment(Qt::AlignCenter);
+    loadingLabel->setStyleSheet("QLabel { color: #86868b; font-size: 16px; padding: 40px; }");
+    overlayLayout->addWidget(loadingLabel);
+    
+    m_cachedSwimlaneWidget = m_swimlaneTabContent;
+    m_mainTabWidget->removeTab(idx);
+    m_swimlaneTabContent = loadingOverlay;
+    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+    addSwimlaneCloseButton(newIdx);
+    m_mainTabWidget->setCurrentIndex(newIdx);
+    
+    QFuture<SwimlaneScanData> future = QtConcurrent::run([this]() {
+        return this->collectSwimlaneData();
+    });
+    m_swimlaneScanWatcher->setFuture(future);
 }
 
 void MainWindow::showHistoricalTasksDialog(const QString& r2moPath, const QString& projectName)
@@ -2476,22 +2607,12 @@ bool MainWindow::addAIToolsToItem(QTreeWidgetItem* parentItem, const QList<AIToo
 
 void MainWindow::onSwimlaneRefresh()
 {
-    // Only refresh if swimlane tab is visible
-    if (!m_swimlaneTabContent) {
-        return;
-    }
+    if (m_swimlaneRefreshing) return;
     
-    int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
-    if (idx < 0 || m_mainTabWidget->currentIndex() != idx) {
-        return;
-    }
+    m_swimlaneRefreshing = true;
     
-    // Rebuild swimlane view
-    QWidget *newWidget = buildSwimlaneView();
-    m_mainTabWidget->removeTab(idx);
-    m_swimlaneTabContent->deleteLater();
-    m_swimlaneTabContent = newWidget;
-    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
-    m_mainTabWidget->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
-    m_mainTabWidget->setCurrentIndex(newIdx);
+    QFuture<SwimlaneScanData> future = QtConcurrent::run([this]() {
+        return this->collectSwimlaneData();
+    });
+    m_swimlaneScanWatcher->setFuture(future);
 }
