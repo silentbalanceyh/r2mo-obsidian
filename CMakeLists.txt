@@ -52,6 +52,8 @@ set(SOURCES
     src/utils/r2moscanner.h
     src/utils/aitoolscanner.cpp
     src/utils/aitoolscanner.h
+    src/utils/gitscanner.cpp
+    src/utils/gitscanner.h
 )
 
 # Font resources

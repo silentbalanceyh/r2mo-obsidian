@@ -6,6 +6,7 @@
 #include "utils/obsidianconfigreader.h"
 #include "utils/r2moscanner.h"
 #include "utils/aitoolscanner.h"
+#include "utils/gitscanner.h"
 #include "i18n/translationmanager.h"
 
 #include <QMenuBar>
@@ -1828,12 +1829,17 @@ QWidget* MainWindow::buildSwimlaneView()
     int globalMaxQueue = 0;
     struct VaultSwimlaneData {
         QString vaultName;
+        QString vaultPath;
+        GitStatusInfo gitStatus;
+        QList<AIToolInfo> aiTools;
         struct LaneRow {
             QString name;
+            QString projectPath;
             QString r2moPath;
             int historicalCount;
             QList<TaskInfo> queueTasks;
             bool isParent;
+            GitStatusInfo gitStatus;
             QList<LaneRow> children;
         };
         QList<LaneRow> rows;
@@ -1859,14 +1865,23 @@ QWidget* MainWindow::buildSwimlaneView()
 
         VaultSwimlaneData vd;
         vd.vaultName = vault.name;
+        vd.vaultPath = vault.path;
+        
+        GitScanner gitScanner;
+        vd.gitStatus = gitScanner.scanRepository(vault.path);
+        
+        AIToolScanner aiScanner;
+        vd.aiTools = aiScanner.scanProject(vault.path);
 
         // Parent row
         VaultSwimlaneData::LaneRow parentRow;
         parentRow.name = parent->name;
+        parentRow.projectPath = parent->path;
         parentRow.isParent = true;
         parentRow.r2moPath = parent->path + "/.r2mo";
         parentRow.historicalCount = scanner.getHistoricalTasks(parent->path + "/.r2mo").size();
         parentRow.queueTasks = scanner.getTaskQueueFiles(parent->path + "/.r2mo");
+        parentRow.gitStatus = gitScanner.scanRepository(parent->path);
         if (parentRow.queueTasks.size() > globalMaxQueue)
             globalMaxQueue = parentRow.queueTasks.size();
 
@@ -1874,10 +1889,12 @@ QWidget* MainWindow::buildSwimlaneView()
         for (const R2moSubProject* child : children) {
             VaultSwimlaneData::LaneRow childRow;
             childRow.name = child->name;
+            childRow.projectPath = child->path;
             childRow.isParent = false;
             childRow.r2moPath = child->path + "/.r2mo";
             childRow.historicalCount = scanner.getHistoricalTasks(child->path + "/.r2mo").size();
             childRow.queueTasks = scanner.getTaskQueueFiles(child->path + "/.r2mo");
+            childRow.gitStatus = gitScanner.scanRepository(child->path);
             if (childRow.queueTasks.size() > globalMaxQueue)
                 globalMaxQueue = childRow.queueTasks.size();
             parentRow.children.append(childRow);
@@ -1910,13 +1927,18 @@ QWidget* MainWindow::buildSwimlaneView()
     // Helper lambda to add one lane row
     auto addLaneRow = [&](QGridLayout *grid, int row, const QString &name,
                           int histCount, const QList<TaskInfo> &queueTasks,
-                          const QString &r2moPath, bool isChild) {
-        // Name label — fixed width for alignment
-        QLabel *nameLabel = new QLabel(isChild ? QString("  └ %1").arg(name) : name);
+                          const QString &r2moPath, bool isChild,
+                          const GitStatusInfo &gitStatus) {
+        // Name label — fixed width for alignment, Git status color
+        QString nameText = isChild ? QString("  └ %1").arg(name) : name;
+        if (gitStatus.isGitRepo) {
+            nameText += QString(" [%1]").arg(gitStatus.statusText());
+        }
+        QLabel *nameLabel = new QLabel(nameText);
         nameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-        nameLabel->setFixedSize(nameColWidth, rowHeight);
+        nameLabel->setFixedSize(nameColWidth + 60, rowHeight);
         nameLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 12px; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }")
-            .arg(textColor.name()).arg(laneBg.name()).arg(borderColor.name()));
+            .arg(gitStatus.statusColor()).arg(laneBg.name()).arg(borderColor.name()));
         if (!isChild) {
             QFont f = nameLabel->font();
             f.setBold(true);
@@ -1958,10 +1980,42 @@ QWidget* MainWindow::buildSwimlaneView()
 
     // Build rows for each vault
     for (const VaultSwimlaneData &vd : allVaultData) {
-        // Vault header — gradient background, purple text
-        QLabel *vaultHeader = new QLabel(QString("📁 %1").arg(vd.vaultName));
-        vaultHeader->setStyleSheet(QString("QLabel { color: #af52de; font-size: 13px; font-weight: 600; padding: 8px 12px; background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e8f4ff, stop:0.5 #f0e8ff, stop:1 #fff8f0); border: 1px solid #007aff; border-radius: 6px; }"));
-        contentLayout->addWidget(vaultHeader);
+        // AI Tools info row
+        QString aiToolsText;
+        int totalSessions = 0;
+        for (const AIToolInfo& tool : vd.aiTools) {
+            totalSessions += tool.sessions.count;
+        }
+        
+        if (!vd.aiTools.isEmpty()) {
+            aiToolsText = QString("🤖 %1 tools · %2 sessions").arg(vd.aiTools.size()).arg(totalSessions);
+        }
+        
+        // Vault header with Git status and AI info
+        QWidget *vaultHeaderWidget = new QWidget();
+        QHBoxLayout *vaultHeaderLayout = new QHBoxLayout(vaultHeaderWidget);
+        vaultHeaderLayout->setContentsMargins(8, 4, 8, 4);
+        vaultHeaderLayout->setSpacing(8);
+        vaultHeaderWidget->setStyleSheet(QString("QWidget { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e8f4ff, stop:0.5 #f0e8ff, stop:1 #fff8f0); border: 1px solid #007aff; border-radius: 6px; }"));
+        
+        // Vault name with Git status color
+        QString vaultNameText = QString("📁 %1").arg(vd.vaultName);
+        if (vd.gitStatus.isGitRepo) {
+            vaultNameText += QString(" [%1]").arg(vd.gitStatus.statusText());
+        }
+        QLabel *vaultNameLabel = new QLabel(vaultNameText);
+        vaultNameLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 13px; font-weight: 600; background: transparent; border: none; }").arg(vd.gitStatus.statusColor()));
+        vaultHeaderLayout->addWidget(vaultNameLabel);
+        
+        // AI Tools info
+        if (!aiToolsText.isEmpty()) {
+            QLabel *aiLabel = new QLabel(aiToolsText);
+            aiLabel->setStyleSheet("QLabel { color: #af52de; font-size: 11px; background: transparent; border: none; }");
+            vaultHeaderLayout->addWidget(aiLabel);
+        }
+        
+        vaultHeaderLayout->addStretch();
+        contentLayout->addWidget(vaultHeaderWidget);
 
         QWidget *gridWidget = new QWidget();
         gridWidget->setStyleSheet("background: white;");
@@ -1997,10 +2051,10 @@ QWidget* MainWindow::buildSwimlaneView()
         int rowIdx = 1;
         for (const VaultSwimlaneData::LaneRow &parentRow : vd.rows) {
             // Parent project row
-            addLaneRow(grid, rowIdx++, parentRow.name, parentRow.historicalCount, parentRow.queueTasks, parentRow.r2moPath, false);
+            addLaneRow(grid, rowIdx++, parentRow.name, parentRow.historicalCount, parentRow.queueTasks, parentRow.r2moPath, false, parentRow.gitStatus);
             // Child rows
             for (const VaultSwimlaneData::LaneRow &childRow : parentRow.children) {
-                addLaneRow(grid, rowIdx++, childRow.name, childRow.historicalCount, childRow.queueTasks, childRow.r2moPath, true);
+                addLaneRow(grid, rowIdx++, childRow.name, childRow.historicalCount, childRow.queueTasks, childRow.r2moPath, true, childRow.gitStatus);
             }
         }
 
