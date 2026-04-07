@@ -4,6 +4,12 @@
 
 This is a Qt 6.10.0 C++ desktop application for Obsidian vault management. Agents should understand the Qt/C++ context when processing tasks.
 
+## Model Configuration
+
+**Default Model**: `alibaba-coding-plan-cn/glm-5` (Alibaba Coding Plan GLM-5)
+
+Agents working on this project should use this model by default for optimal performance with Qt/C++ code generation.
+
 ## Agent Workflow Rules
 
 ### Task Processing

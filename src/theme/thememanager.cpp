@@ -540,13 +540,17 @@ QPushButton#editBtn:pressed {
     background-color: rgba(0, 0, 0, 0.08);
 }
 
-/* Toolbar icon buttons (square 32x32) */
-QPushButton#addBtn {
+/* Toolbar icon buttons - Add/Remove segmented control */
+QPushButton#addBtnLeft {
     background-color: #007aff;
     color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 18px;
+    border: 1px solid #007aff;
+    border-right: none;
+    border-top-left-radius: 3px;
+    border-bottom-left-radius: 3px;
+    border-top-right-radius: 0px;
+    border-bottom-right-radius: 0px;
+    font-size: 16px;
     font-weight: bold;
     min-width: 32px;
     max-width: 32px;
@@ -555,16 +559,19 @@ QPushButton#addBtn {
     padding: 0px;
 }
 
-QPushButton#addBtn:hover {
+QPushButton#addBtnLeft:hover {
     background-color: #0056cc;
 }
 
-QPushButton#removeBtn {
+QPushButton#removeBtnRight {
     background-color: transparent;
     color: #ff3b30;
     border: 1px solid #ff3b30;
-    border-radius: 6px;
-    font-size: 18px;
+    border-top-left-radius: 0px;
+    border-bottom-left-radius: 0px;
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
+    font-size: 16px;
     font-weight: bold;
     min-width: 32px;
     max-width: 32px;
@@ -573,7 +580,7 @@ QPushButton#removeBtn {
     padding: 0px;
 }
 
-QPushButton#removeBtn:hover {
+QPushButton#removeBtnRight:hover {
     background-color: #ff3b30;
     color: white;
 }
@@ -581,7 +588,7 @@ QPushButton#removeBtn:hover {
 QPushButton#swimlaneBtn {
     background-color: transparent;
     border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: 6px;
+    border-radius: 3px;
     font-size: 16px;
     min-width: 32px;
     max-width: 32px;
@@ -1091,13 +1098,17 @@ QPushButton#editBtn:pressed {
     background-color: rgba(255, 255, 255, 0.08);
 }
 
-/* Toolbar icon buttons (square 32x32) */
-QPushButton#addBtn {
+/* Toolbar icon buttons - Add/Remove segmented control */
+QPushButton#addBtnLeft {
     background-color: #0a84ff;
     color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 18px;
+    border: 1px solid #0a84ff;
+    border-right: none;
+    border-top-left-radius: 3px;
+    border-bottom-left-radius: 3px;
+    border-top-right-radius: 0px;
+    border-bottom-right-radius: 0px;
+    font-size: 16px;
     font-weight: bold;
     min-width: 32px;
     max-width: 32px;
@@ -1106,16 +1117,19 @@ QPushButton#addBtn {
     padding: 0px;
 }
 
-QPushButton#addBtn:hover {
+QPushButton#addBtnLeft:hover {
     background-color: #0070e0;
 }
 
-QPushButton#removeBtn {
+QPushButton#removeBtnRight {
     background-color: transparent;
     color: #ff453a;
     border: 1px solid #ff453a;
-    border-radius: 6px;
-    font-size: 18px;
+    border-top-left-radius: 0px;
+    border-bottom-left-radius: 0px;
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
+    font-size: 16px;
     font-weight: bold;
     min-width: 32px;
     max-width: 32px;
@@ -1124,7 +1138,7 @@ QPushButton#removeBtn {
     padding: 0px;
 }
 
-QPushButton#removeBtn:hover {
+QPushButton#removeBtnRight:hover {
     background-color: #ff453a;
     color: white;
 }
@@ -1132,7 +1146,7 @@ QPushButton#removeBtn:hover {
 QPushButton#swimlaneBtn {
     background-color: transparent;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
+    border-radius: 3px;
     font-size: 16px;
     min-width: 32px;
     max-width: 32px;

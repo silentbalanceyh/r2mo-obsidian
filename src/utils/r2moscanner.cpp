@@ -97,7 +97,7 @@ int R2moScanner::getTaskQueueCount(const QString& r2moPath)
     
     taskDir.setFilter(QDir::Files | QDir::NoDotAndDotDot);
     QStringList filters;
-    filters << "*.md";
+    filters << "task-*.md";
     taskDir.setNameFilters(filters);
     
     return taskDir.entryList().size();
@@ -106,34 +106,53 @@ int R2moScanner::getTaskQueueCount(const QString& r2moPath)
 QList<TaskInfo> R2moScanner::getHistoricalTasks(const QString& r2moPath)
 {
     QList<TaskInfo> tasks;
-    QString taskPath = r2moPath + "/task";
-    QDir taskDir(taskPath);
-    
-    if (!taskDir.exists()) {
-        return tasks;
-    }
-    
-    taskDir.setFilter(QDir::Files | QDir::NoDotAndDotDot);
-    QStringList filters;
-    filters << "*.md";
-    taskDir.setNameFilters(filters);
-    
-    QStringList taskFiles = taskDir.entryList();
-    for (const QString& fileName : taskFiles) {
-        QString filePath = taskPath + "/" + fileName;
-        QString title = extractTitleFromMd(filePath);
-        QDateTime runAt = extractRunAtFromMd(filePath);
-        
-        if (!title.isEmpty()) {
-            TaskInfo task;
-            task.title = title;
-            task.filePath = filePath;
-            task.fileName = fileName;
-            task.modifiedTime = getFileModifiedTime(filePath);
-            task.runAtTime = runAt;
-            tasks.append(task);
+    QRegularExpression dateDirRegex("^\\d{4}-\\d{2}-\\d{2}$");
+
+    auto scanDateDirectories = [&](const QString& basePath) {
+        QDir baseDir(basePath);
+        if (!baseDir.exists()) {
+            return;
         }
-    }
+
+        baseDir.setFilter(QDir::Dirs | QDir::NoDotAndDotDot);
+        const QStringList dateDirs = baseDir.entryList();
+
+        for (const QString& dirName : dateDirs) {
+            if (!dateDirRegex.match(dirName).hasMatch()) {
+                continue;
+            }
+
+            const QString dateDirPath = basePath + "/" + dirName;
+            QDir dateDir(dateDirPath);
+            dateDir.setFilter(QDir::Files | QDir::NoDotAndDotDot);
+            QStringList mdFilters;
+            mdFilters << "*.md";
+            dateDir.setNameFilters(mdFilters);
+
+            const QStringList mdFiles = dateDir.entryList();
+            for (const QString& fileName : mdFiles) {
+                const QString filePath = dateDirPath + "/" + fileName;
+                const QString fmTitle = extractFrontmatterTitle(filePath);
+                if (fmTitle.isEmpty()) {
+                    continue;  // Only count files with YAML frontmatter title
+                }
+
+                TaskInfo task;
+                task.title = fmTitle;
+                task.filePath = filePath;
+                task.fileName = fileName;
+                task.modifiedTime = getFileModifiedTime(filePath);
+                task.runAtTime = extractRunAtFromMd(filePath);
+                tasks.append(task);
+            }
+        }
+    };
+
+    // Historical sources:
+    // 1) .r2mo/task/YYYY-MM-DD/*.md
+    // 2) .r2mo/history/YYYY-MM-DD/*.md
+    scanDateDirectories(r2moPath + "/task");
+    scanDateDirectories(r2moPath + "/history");
     
     // Sort by runAt time (if available) or modified time (newest first)
     std::sort(tasks.begin(), tasks.end(), [](const TaskInfo& a, const TaskInfo& b) {
@@ -190,6 +209,33 @@ QString R2moScanner::extractTitleFromMd(const QString& filePath)
     return fi.baseName();
 }
 
+QString R2moScanner::extractFrontmatterTitle(const QString& filePath)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return QString();
+    }
+    
+    QTextStream in(&file);
+    QString content = in.readAll();
+    file.close();
+    
+    QRegularExpression frontmatterRegex("^---\\s*\n(.*?)\\n---", 
+                                         QRegularExpression::DotMatchesEverythingOption);
+    QRegularExpressionMatch match = frontmatterRegex.match(content);
+    
+    if (match.hasMatch()) {
+        QString frontmatter = match.captured(1);
+        QRegularExpression titleRegex("title:\\s*['\"]?(.+?)['\"]?\\s*$", 
+                                       QRegularExpression::MultilineOption);
+        QRegularExpressionMatch titleMatch = titleRegex.match(frontmatter);
+        if (titleMatch.hasMatch()) {
+            return titleMatch.captured(1).trimmed();
+        }
+    }
+    return QString();
+}
+
 QDateTime R2moScanner::getFileModifiedTime(const QString& filePath)
 {
     QFileInfo fi(filePath);
@@ -208,17 +254,20 @@ QList<TaskInfo> R2moScanner::getTaskQueueFiles(const QString& r2moPath)
     
     taskDir.setFilter(QDir::Files | QDir::NoDotAndDotDot);
     QStringList filters;
-    filters << "task-*.md";  // Match task-NNN.md pattern
+    filters << "*.md";
     taskDir.setNameFilters(filters);
     
     QStringList taskFiles = taskDir.entryList();
     for (const QString& fileName : taskFiles) {
         QString filePath = taskPath + "/" + fileName;
-        QString title = extractTitleFromMd(filePath);
+        QString fmTitle = extractFrontmatterTitle(filePath);
+        if (fmTitle.isEmpty()) {
+            continue;  // Only count files with yaml frontmatter title
+        }
         QDateTime runAt = extractRunAtFromMd(filePath);
         
         TaskInfo task;
-        task.title = title.isEmpty() ? fileName : title;
+        task.title = fmTitle;
         task.filePath = filePath;
         task.fileName = fileName;
         task.modifiedTime = getFileModifiedTime(filePath);

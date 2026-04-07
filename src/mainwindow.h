@@ -76,6 +76,7 @@ private:
     void buildAIToolsTab(const QString& vaultPath);
     void buildAIToolsTree(const QList<R2moSubProject>& projects);
     bool addAIToolsToItem(QTreeWidgetItem* parentItem, const QList<AIToolInfo>& tools);
+    void showHistoricalTasksDialog(const QString& r2moPath, const QString& projectName);
     void retranslateUi();
     void updateLanguageButtons();
     void updateThemeToggleIcon();

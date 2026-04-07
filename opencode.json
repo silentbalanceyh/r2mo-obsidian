@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "mylocal/glm-5",
+  "model": "alibaba-coding-plan-cn/glm-5",
   "provider": {
     "mylocal": {
       "name": "My Local",
@@ -51,22 +51,22 @@
   },
   "agent": {
     "orchestrator": {
-      "model": "mylocal/glm-5"
+      "model": "alibaba-coding-plan-cn/glm-5"
     },
     "oracle": {
-      "model": "mylocal/glm-5"
+      "model": "alibaba-coding-plan-cn/glm-5"
     },
     "librarian": {
-      "model": "mylocal/glm-5"
+      "model": "alibaba-coding-plan-cn/glm-5"
     },
     "explorer": {
-      "model": "mylocal/glm-5"
+      "model": "alibaba-coding-plan-cn/glm-5"
     },
     "designer": {
-      "model": "mylocal/glm-5"
+      "model": "alibaba-coding-plan-cn/glm-5"
     },
     "fixer": {
-      "model": "mylocal/glm-5"
+      "model": "alibaba-coding-plan-cn/glm-5"
     }
   }
 }

@@ -49,6 +49,7 @@ public:
 
 private:
     QString extractTitleFromMd(const QString& filePath);
+    QString extractFrontmatterTitle(const QString& filePath);
     QDateTime extractRunAtFromMd(const QString& filePath);
     QDateTime getFileModifiedTime(const QString& filePath);
 };

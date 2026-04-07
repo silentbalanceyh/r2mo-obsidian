@@ -38,6 +38,7 @@
 #include <QButtonGroup>
 #include <QTabWidget>
 #include <QWheelEvent>
+#include <QMouseEvent>
 #include <QHeaderView>
 #include <QSpacerItem>
 #include <QStatusBar>
@@ -185,28 +186,35 @@ void MainWindow::setupToolBar()
     m_toolBar = addToolBar(tr("Toolbar"));
     m_toolBar->setMovable(false);
     
-    // Create left-side container for Add/Remove/Swimlane buttons
+    // Create left-side container for Add/Remove as ButtonGroup + Divider + Swimlane
     QWidget *leftControls = new QWidget();
     leftControls->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     QHBoxLayout *leftLayout = new QHBoxLayout(leftControls);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(4);
     
-    // Add button (Primary style - blue background)
+    // Add/Remove as segmented control (like 中|En)
+    QWidget *addRemoveGroup = new QWidget();
+    addRemoveGroup->setObjectName("addRemoveGroup");
+    QHBoxLayout *arLayout = new QHBoxLayout(addRemoveGroup);
+    arLayout->setContentsMargins(0, 0, 0, 0);
+    arLayout->setSpacing(0);
+    
     m_addBtn = new QPushButton();
     m_addBtn->setText("+");
-    m_addBtn->setObjectName("addBtn");
+    m_addBtn->setObjectName("addBtnLeft");
     m_addBtn->setCursor(Qt::PointingHandCursor);
     m_addBtn->setToolTip(tr("Add Vault"));
-    leftLayout->addWidget(m_addBtn);
+    arLayout->addWidget(m_addBtn);
     
-    // Remove button (red border and text)
     m_removeBtn = new QPushButton();
-    m_removeBtn->setText("-");
-    m_removeBtn->setObjectName("removeBtn");
+    m_removeBtn->setText("−");
+    m_removeBtn->setObjectName("removeBtnRight");
     m_removeBtn->setCursor(Qt::PointingHandCursor);
     m_removeBtn->setToolTip(tr("Remove Vault"));
-    leftLayout->addWidget(m_removeBtn);
+    arLayout->addWidget(m_removeBtn);
+    
+    leftLayout->addWidget(addRemoveGroup);
     
     // Divider
     QFrame *divider1 = new QFrame();
@@ -450,7 +458,8 @@ void MainWindow::setupCentralWidget()
     // Create tab widget for preview tabs
     m_tabWidget = new QTabWidget;
     m_tabWidget->setObjectName("previewTabs");
-    m_tabWidget->setTabsClosable(true);
+    // Preview inner tabs are not user-closeable
+    m_tabWidget->setTabsClosable(false);
     m_tabWidget->setStyleSheet(
         "QTabWidget#previewTabs { border: none; background: white; }"
         "QTabWidget#previewTabs::pane { border: none; background: white; }"
@@ -605,6 +614,7 @@ void MainWindow::setupCentralWidget()
     // Create main tab widget to hold HOME and Swimlane views
     m_mainTabWidget = new QTabWidget;
     m_mainTabWidget->setObjectName("mainTabs");
+    m_mainTabWidget->setTabsClosable(true);
     m_mainTabWidget->setStyleSheet(
         "QTabWidget#mainTabs { background: transparent; border: none; }"
         "QTabWidget#mainTabs::pane { border: none; background: transparent; }"
@@ -612,13 +622,15 @@ void MainWindow::setupCentralWidget()
         "QTabWidget#mainTabs QTabBar::tab { padding: 6px 16px; margin-right: 2px; background: #f0f0f0; border: 1px solid #d0d0d0; border-bottom: none; border-radius: 4px 4px 0 0; }"
         "QTabWidget#mainTabs QTabBar::tab:selected { background: white; color: #007aff; border-color: #007aff; }"
         "QTabWidget#mainTabs QTabBar::tab:!selected { background: #e8e8e8; color: #666; }"
+        "QTabBar::close-button { subcontrol-position: right; margin: 2px; }"
     );
     m_homeTabContent = homeTabContent;
     m_mainTabWidget->addTab(m_homeTabContent, tr("🏠 HOME"));
+    // HOME tab is not closable
+    m_mainTabWidget->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
     
-    // Swimlane tab - initially empty, populated on switch
-    m_swimlaneTabContent = new QWidget();
-    m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+    // No swimlane tab initially — opened by button, closable
+    m_swimlaneTabContent = nullptr;
     
     mainLayout->addWidget(m_mainTabWidget, 1);
 
@@ -642,15 +654,16 @@ void MainWindow::setupConnections()
             this, &MainWindow::onLanguageChanged);
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &MainWindow::onThemeChanged);
-    connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, [this](int index) {
+    // Keep preview inner tabs fixed (non-closeable)
+    // Main tab close: allow closing swimlane tab (index > 0)
+    connect(m_mainTabWidget, &QTabWidget::tabCloseRequested, this, [this](int index) {
         if (index > 0) {
-            m_tabWidget->removeTab(index);
-        }
-    });
-    // When user clicks the swimlane tab directly, refresh its content
-    connect(m_mainTabWidget, &QTabWidget::currentChanged, this, [this](int index) {
-        if (index == 1) {
-            onSwimlane();
+            QWidget *w = m_mainTabWidget->widget(index);
+            m_mainTabWidget->removeTab(index);
+            if (w == m_swimlaneTabContent) {
+                m_swimlaneTabContent->deleteLater();
+                m_swimlaneTabContent = nullptr;
+            }
         }
     });
 }
@@ -1752,213 +1765,329 @@ void MainWindow::onThemeToggle()
 
 void MainWindow::onSwimlane()
 {
-    // Guard against re-entrant calls from currentChanged signal
-    static bool rebuilding = false;
-    if (rebuilding) return;
-    rebuilding = true;
-
-    // Rebuild swimlane content
-    QWidget *newSwimlane = buildSwimlaneView();
-    int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
-    if (idx >= 0) {
-        m_mainTabWidget->removeTab(idx);
-    }
+    // If swimlane tab already exists, just switch to it
     if (m_swimlaneTabContent) {
-        m_swimlaneTabContent->deleteLater();
+        int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
+        if (idx >= 0) {
+            m_mainTabWidget->setCurrentIndex(idx);
+            return;
+        }
     }
-    m_swimlaneTabContent = newSwimlane;
-    m_mainTabWidget->insertTab(1, m_swimlaneTabContent, tr("📊 泳道图"));
-    m_mainTabWidget->setCurrentIndex(1);
 
-    rebuilding = false;
+    // Build and add swimlane tab
+    m_mainTabWidget->setTabsClosable(true);
+    m_swimlaneTabContent = buildSwimlaneView();
+    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+    // HOME tab remains non-closeable
+    m_mainTabWidget->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
+    m_mainTabWidget->setCurrentIndex(newIdx);
 }
 
 QWidget* MainWindow::buildSwimlaneView()
 {
     QWidget *container = new QWidget();
+    container->setStyleSheet("background: white;");
     QVBoxLayout *mainLayout = new QVBoxLayout(container);
-    mainLayout->setContentsMargins(8, 8, 8, 8);
+    mainLayout->setContentsMargins(16, 12, 16, 12);
     mainLayout->setSpacing(8);
-    
+
     QList<Vault> vaults = m_vaultModel->vaults();
     if (vaults.isEmpty()) {
         QLabel *emptyLabel = new QLabel(tr("No vaults added. Add a vault to see swimlane view."));
         emptyLabel->setAlignment(Qt::AlignCenter);
-        emptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 40px; }");
+        emptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 40px; background: white; }");
         mainLayout->addWidget(emptyLabel);
         return container;
     }
-    
+
+    // Legend
+    QLabel *legendLabel = new QLabel(tr("🟠 Running Tasks"));
+    legendLabel->setStyleSheet("QLabel { color: #86868b; font-size: 11px; background: white; }");
+    mainLayout->addWidget(legendLabel);
+
+    // Scrollable tree-style swimlane
     QScrollArea *scrollArea = new QScrollArea();
     scrollArea->setWidgetResizable(true);
     scrollArea->setStyleSheet("QScrollArea { border: 1px solid #e0e0e0; background: white; border-radius: 4px; }");
-    
+
     QWidget *swimlaneContent = new QWidget();
+    swimlaneContent->setStyleSheet("background: white;");
     QVBoxLayout *contentLayout = new QVBoxLayout(swimlaneContent);
-    contentLayout->setContentsMargins(16, 16, 16, 16);
-    contentLayout->setSpacing(16);
-    
-    contentLayout->addWidget(new QLabel(tr("📊 Swimlane View - All Projects")));
-    
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(0);
+
+    // Colors
+    QColor borderColor("#e0e0e0");
+    QColor textColor("#333333");
+    QColor headerBg("#f5f5f7");
+    QColor laneBg("#ffffff");
+    QColor pendingColor("#ff9500");
+    QColor emptyColor("#f0f0f0");
+
+    // Collect max queue count across ALL vaults for uniform column width
+    int globalMaxQueue = 0;
+    struct VaultSwimlaneData {
+        QString vaultName;
+        struct LaneRow {
+            QString name;
+            QString r2moPath;
+            int historicalCount;
+            QList<TaskInfo> queueTasks;
+            bool isParent;
+            QList<LaneRow> children;
+        };
+        QList<LaneRow> rows;
+    };
+    QList<VaultSwimlaneData> allVaultData;
+
     for (const Vault& vault : vaults) {
         QDir vaultDir(vault.path);
         if (!vaultDir.exists() || !m_vaultValidator->hasR2moConfig(vault.path)) {
             continue;
         }
-        
         R2moScanner scanner;
         QList<R2moSubProject> projects = scanner.scanVault(vault.path);
-        
-        if (projects.isEmpty()) {
-            continue;
-        }
-        
+        if (projects.isEmpty()) continue;
+
         const R2moSubProject* parent = nullptr;
         QList<const R2moSubProject*> children;
-        
         for (const R2moSubProject& proj : projects) {
-            if (proj.isParent) {
-                parent = &proj;
-            } else {
-                children.append(&proj);
-            }
+            if (proj.isParent) parent = &proj;
+            else children.append(&proj);
         }
-        
-        if (!parent) {
-            continue;
-        }
-        
-        int maxQueueCount = 0;
+        if (!parent) continue;
+
+        VaultSwimlaneData vd;
+        vd.vaultName = vault.name;
+
+        // Parent row
+        VaultSwimlaneData::LaneRow parentRow;
+        parentRow.name = parent->name;
+        parentRow.isParent = true;
+        parentRow.r2moPath = parent->path + "/.r2mo";
+        parentRow.historicalCount = scanner.getHistoricalTasks(parent->path + "/.r2mo").size();
+        parentRow.queueTasks = scanner.getTaskQueueFiles(parent->path + "/.r2mo");
+        if (parentRow.queueTasks.size() > globalMaxQueue)
+            globalMaxQueue = parentRow.queueTasks.size();
+
+        // Children
         for (const R2moSubProject* child : children) {
-            int queueCount = scanner.getTaskQueueFiles(child->path + "/.r2mo").size();
-            if (queueCount > maxQueueCount) {
-                maxQueueCount = queueCount;
-            }
+            VaultSwimlaneData::LaneRow childRow;
+            childRow.name = child->name;
+            childRow.isParent = false;
+            childRow.r2moPath = child->path + "/.r2mo";
+            childRow.historicalCount = scanner.getHistoricalTasks(child->path + "/.r2mo").size();
+            childRow.queueTasks = scanner.getTaskQueueFiles(child->path + "/.r2mo");
+            if (childRow.queueTasks.size() > globalMaxQueue)
+                globalMaxQueue = childRow.queueTasks.size();
+            parentRow.children.append(childRow);
         }
-        int parentQueueCount = scanner.getTaskQueueFiles(parent->path + "/.r2mo").size();
-        if (parentQueueCount > maxQueueCount) {
-            maxQueueCount = parentQueueCount;
-        }
-        
-        QFrame *vaultCard = new QFrame();
-        vaultCard->setStyleSheet("QFrame { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; }");
-        QVBoxLayout *cardLayout = new QVBoxLayout(vaultCard);
-        cardLayout->setContentsMargins(12, 12, 12, 12);
-        cardLayout->setSpacing(8);
-        
-        QLabel *vaultTitle = new QLabel(QString("📁 %1").arg(vault.name));
-        vaultTitle->setStyleSheet("QLabel { color: #1d1d1f; font-size: 14px; font-weight: 600; }");
-        cardLayout->addWidget(vaultTitle);
-        
-        int cellWidth = 60;
-        int cellHeight = 32;
-        int labelWidth = 140;
-        int headerHeight = 28;
-        int gridColCount = qMax(1, maxQueueCount);
-        
-        QWidget *laneWidget = new QWidget();
-        QGridLayout *laneLayout = new QGridLayout(laneWidget);
-        laneLayout->setContentsMargins(0, 0, 0, 0);
-        laneLayout->setSpacing(0);
-        
-        QColor gridBgColor = QColor("#f5f5f7");
-        QColor completedColor = QColor("#34c759");
-        QColor pendingColor = QColor("#ff9500");
-        QColor emptyColor = QColor("#e8e8ed");
-        QColor textColor = QColor("#333333");
-        QColor headerBgColor = QColor("#e8e8ed");
-        QColor borderColor = QColor("#d1d1d6");
-        QColor laneBgColor = QColor("#ffffff");
-        
-        QLabel *headerCorner = new QLabel(tr("Project"));
-        headerCorner->setAlignment(Qt::AlignCenter);
-        headerCorner->setFixedSize(labelWidth, headerHeight);
-        headerCorner->setStyleSheet(QString("QLabel { background: %1; color: %2; font-size: 11px; font-weight: 600; border: 1px solid %3; }").arg(headerBgColor.name()).arg(textColor.name()).arg(borderColor.name()));
-        laneLayout->addWidget(headerCorner, 0, 0);
-        
-        for (int col = 0; col < gridColCount; ++col) {
-            QLabel *colHeader = new QLabel(QString("#%1").arg(col + 1));
-            colHeader->setAlignment(Qt::AlignCenter);
-            colHeader->setFixedSize(cellWidth, headerHeight);
-            colHeader->setStyleSheet(QString("QLabel { background: %1; color: %2; font-size: 11px; font-weight: 600; border: 1px solid %3; }").arg(headerBgColor.name()).arg(textColor.name()).arg(borderColor.name()));
-            laneLayout->addWidget(colHeader, 0, col + 1);
-        }
-        
-        int laneIndex = 1;
-        QList<QPair<QString, QList<TaskInfo>>> allProjectData;
-        
-        allProjectData.append(qMakePair(parent->name, scanner.getHistoricalTasks(parent->path + "/.r2mo")));
-        allProjectData.append(qMakePair(parent->name + " Q", scanner.getTaskQueueFiles(parent->path + "/.r2mo")));
-        
-        for (const R2moSubProject* child : children) {
-            allProjectData.append(qMakePair(child->name, scanner.getHistoricalTasks(child->path + "/.r2mo")));
-            allProjectData.append(qMakePair(child->name + " Q", scanner.getTaskQueueFiles(child->path + "/.r2mo")));
-        }
-        
-        for (const auto& projectData : allProjectData) {
-            const QString& projName = projectData.first;
-            const QList<TaskInfo>& tasks = projectData.second;
-            
-            QLabel *nameLabel = new QLabel(projName);
-            nameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-            nameLabel->setFixedSize(labelWidth, cellHeight + 4);
-            nameLabel->setStyleSheet(QString("QLabel { background: %1; color: %2; font-size: 11px; padding: 4px; border: 1px solid %3; }").arg(laneBgColor.name()).arg(textColor.name()).arg(borderColor.name()));
-            laneLayout->addWidget(nameLabel, laneIndex, 0);
-            
-            for (int col = 0; col < gridColCount; ++col) {
-                QFrame *cell = new QFrame();
-                cell->setFixedSize(cellWidth, cellHeight);
-                
-                QColor bgColor;
-                if (col < tasks.size()) {
-                    bgColor = projName.contains(" Q") ? pendingColor : completedColor;
-                } else {
-                    bgColor = emptyColor;
-                }
-                
-                cell->setStyleSheet(QString("QFrame { background: %1; border: 1px solid %2; }").arg(bgColor.name()).arg(borderColor.name()));
-                
-                if (col < tasks.size()) {
-                    QVBoxLayout *cellLayout = new QVBoxLayout(cell);
-                    cellLayout->setContentsMargins(1, 1, 1, 1);
-                    cellLayout->setSpacing(0);
-                    
-                    QLabel *taskLabel = new QLabel();
-                    QString taskText = tasks[col].title.isEmpty() ? tasks[col].fileName : tasks[col].title;
-                    if (taskText.length() > 8) {
-                        taskText = taskText.left(8) + "...";
-                    }
-                    taskLabel->setText(taskText);
-                    taskLabel->setAlignment(Qt::AlignCenter);
-                    taskLabel->setStyleSheet("QLabel { color: white; font-size: 9px; background: transparent; }");
-                    cellLayout->addWidget(taskLabel);
-                }
-                
-                laneLayout->addWidget(cell, laneIndex, col + 1);
-            }
-            
-            laneIndex++;
-        }
-        
-        QLabel *legendLabel = new QLabel(tr("🟢 Completed  🟠 Pending  ⬜ Empty"));
-        legendLabel->setStyleSheet("QLabel { color: #86868b; font-size: 11px; padding-top: 4px; }");
-        cardLayout->addWidget(legendLabel);
-        
-        cardLayout->addWidget(laneWidget);
-        contentLayout->addWidget(vaultCard);
+        vd.rows.append(parentRow);
+        allVaultData.append(vd);
     }
-    
-    if (contentLayout->count() <= 1) {
+
+    if (allVaultData.isEmpty()) {
         QLabel *noDataLabel = new QLabel(tr("No R2MO projects found in any vault."));
         noDataLabel->setAlignment(Qt::AlignCenter);
-        noDataLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 40px; }");
+        noDataLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 40px; background: white; }");
         contentLayout->addWidget(noDataLabel);
+        scrollArea->setWidget(swimlaneContent);
+        mainLayout->addWidget(scrollArea, 1);
+        return container;
     }
-    
+
+    int nameColWidth = 260;
+    int histColWidth = 40;
+    int cellWidth = 36;
+    int cellHeight = 24;
+    int rowHeight = 28;
+    int gridColCount = qMax(1, globalMaxQueue);
+
+    // Colors
+    QColor runningColor("#007aff");   // Blue for running tasks
+    QColor emptyBorder("#d0d0d0");    // Gray border for empty slots
+
+    // Helper lambda to add one lane row
+    auto addLaneRow = [&](QGridLayout *grid, int row, const QString &name,
+                          int histCount, const QList<TaskInfo> &queueTasks,
+                          const QString &r2moPath, bool isChild) {
+        // Name label — fixed width for alignment
+        QLabel *nameLabel = new QLabel(isChild ? QString("  └ %1").arg(name) : name);
+        nameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        nameLabel->setFixedSize(nameColWidth, rowHeight);
+        nameLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 12px; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }")
+            .arg(textColor.name()).arg(laneBg.name()).arg(borderColor.name()));
+        if (!isChild) {
+            QFont f = nameLabel->font();
+            f.setBold(true);
+            nameLabel->setFont(f);
+        }
+        grid->addWidget(nameLabel, row, 0);
+
+        // Historical count — clickable
+        QLabel *histLabel = new QLabel(QString::number(histCount));
+        histLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        histLabel->setFixedSize(histColWidth, rowHeight);
+        histLabel->setCursor(Qt::PointingHandCursor);
+        histLabel->setStyleSheet(QString("QLabel { color: #007aff; font-size: 11px; padding: 2px 4px; background: %1; border-bottom: 1px solid %2; text-decoration: underline; }").arg(laneBg.name()).arg(borderColor.name()));
+        histLabel->setProperty("r2moPath", r2moPath);
+        histLabel->setProperty("projectName", name);
+        histLabel->installEventFilter(this);
+        grid->addWidget(histLabel, row, 1);
+
+        // Queue cells — running tasks in blue, empty slots with gray border
+        for (int col = 0; col < gridColCount; ++col) {
+            QFrame *cell = new QFrame();
+            cell->setFixedSize(cellWidth, cellHeight);
+            if (col < queueTasks.size()) {
+                cell->setStyleSheet(QString("QFrame { background: %1; border: 1px solid %2; border-radius: 3px; margin: 1px; }").arg(runningColor.name()).arg(runningColor.darker(120).name()));
+                cell->setToolTip(queueTasks[col].title.isEmpty() ? queueTasks[col].fileName : queueTasks[col].title);
+            } else {
+                cell->setStyleSheet(QString("QFrame { background: transparent; border: 1px solid %1; border-radius: 3px; margin: 1px; }").arg(emptyBorder.name()));
+            }
+            grid->addWidget(cell, row, col + 2);
+        }
+    };
+
+    // Build rows for each vault
+    for (const VaultSwimlaneData &vd : allVaultData) {
+        // Vault header
+        QLabel *vaultHeader = new QLabel(QString("📁 %1").arg(vd.vaultName));
+        vaultHeader->setStyleSheet(QString("QLabel { color: #1d1d1f; font-size: 13px; font-weight: 600; padding: 8px 8px 4px 8px; background: %1; border-bottom: 2px solid #007aff; }").arg(headerBg.name()));
+        contentLayout->addWidget(vaultHeader);
+
+        QWidget *gridWidget = new QWidget();
+        gridWidget->setStyleSheet("background: white;");
+        QGridLayout *grid = new QGridLayout(gridWidget);
+        grid->setContentsMargins(0, 0, 0, 0);
+        grid->setSpacing(0);
+
+        // Column headers
+        QLabel *nameHeader = new QLabel(tr("Project"));
+        nameHeader->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        nameHeader->setFixedHeight(24);
+        nameHeader->setStyleSheet(QString("QLabel { color: %1; font-size: 11px; font-weight: 600; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
+        grid->addWidget(nameHeader, 0, 0);
+
+        QLabel *histHeader = new QLabel(tr("Hist."));
+        histHeader->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        histHeader->setFixedSize(histColWidth, 24);
+        histHeader->setToolTip(tr("Historical task count"));
+        histHeader->setStyleSheet(QString("QLabel { color: %1; font-size: 11px; font-weight: 600; padding: 2px 4px; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
+        grid->addWidget(histHeader, 0, 1);
+
+        for (int col = 0; col < gridColCount; ++col) {
+            QLabel *colH = new QLabel(QString("#%1").arg(col + 1));
+            colH->setAlignment(Qt::AlignCenter);
+            colH->setFixedSize(cellWidth, 24);
+            colH->setStyleSheet(QString("QLabel { color: %1; font-size: 10px; font-weight: 600; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
+            grid->addWidget(colH, 0, col + 2);
+        }
+
+        // Spacer column to push everything left
+        grid->setColumnStretch(gridColCount + 2, 1);
+
+        int rowIdx = 1;
+        for (const VaultSwimlaneData::LaneRow &parentRow : vd.rows) {
+            // Parent project row
+            addLaneRow(grid, rowIdx++, parentRow.name, parentRow.historicalCount, parentRow.queueTasks, parentRow.r2moPath, false);
+            // Child rows
+            for (const VaultSwimlaneData::LaneRow &childRow : parentRow.children) {
+                addLaneRow(grid, rowIdx++, childRow.name, childRow.historicalCount, childRow.queueTasks, childRow.r2moPath, true);
+            }
+        }
+
+        contentLayout->addWidget(gridWidget);
+    }
+
+    contentLayout->addStretch(1);
     scrollArea->setWidget(swimlaneContent);
     mainLayout->addWidget(scrollArea, 1);
-    
+
     return container;
+}
+
+void MainWindow::showHistoricalTasksDialog(const QString& r2moPath, const QString& projectName)
+{
+    R2moScanner scanner;
+    QList<TaskInfo> tasks = scanner.getHistoricalTasks(r2moPath);
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Historical Tasks - %1").arg(projectName));
+    dialog.resize(1120, 620);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+
+    QTreeWidget *tree = new QTreeWidget(&dialog);
+    tree->setHeaderLabels(QStringList() << tr("Task") << tr("Time") << tr("File"));
+    tree->setRootIsDecorated(true);
+    tree->setAlternatingRowColors(true);
+    tree->setUniformRowHeights(false);
+    tree->header()->setStretchLastSection(false);
+    tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+
+    if (tasks.isEmpty()) {
+        QTreeWidgetItem *empty = new QTreeWidgetItem(tree);
+        empty->setText(0, tr("No historical tasks found."));
+        tree->addTopLevelItem(empty);
+    } else {
+        QMap<QString, QList<TaskInfo>> grouped;
+        for (const TaskInfo &task : tasks) {
+            QString dateKey;
+            QString p = task.filePath;
+            int idx = p.indexOf("/task/");
+            if (idx >= 0) {
+                QString rel = p.mid(idx + 6);
+                int slash = rel.indexOf('/');
+                if (slash > 0) {
+                    QString d = rel.left(slash);
+                    static const QRegularExpression dateRe("^\\d{4}-\\d{2}-\\d{2}$");
+                    if (dateRe.match(d).hasMatch()) {
+                        dateKey = d;
+                    }
+                }
+            }
+            if (dateKey.isEmpty()) {
+                dateKey = task.modifiedTime.date().toString("yyyy-MM-dd");
+            }
+            grouped[dateKey].append(task);
+        }
+
+        QStringList dates = grouped.keys();
+        std::sort(dates.begin(), dates.end(), std::greater<QString>());
+
+        for (const QString &date : dates) {
+            QTreeWidgetItem *dateItem = new QTreeWidgetItem(tree);
+            dateItem->setText(0, QString("%1 (%2)").arg(date).arg(grouped[date].size()));
+            QFont f = dateItem->font(0);
+            f.setBold(true);
+            dateItem->setFont(0, f);
+
+            for (const TaskInfo &task : grouped[date]) {
+                QTreeWidgetItem *item = new QTreeWidgetItem(dateItem);
+                item->setText(0, task.title);
+                QDateTime t = task.runAtTime.isValid() ? task.runAtTime : task.modifiedTime;
+                item->setText(1, t.toString("yyyy-MM-dd HH:mm:ss"));
+                item->setText(2, task.fileName);
+                item->setToolTip(0, task.filePath);
+            }
+            dateItem->setExpanded(true);
+            tree->addTopLevelItem(dateItem);
+        }
+    }
+
+    layout->addWidget(tree, 1);
+
+    QHBoxLayout *btnRow = new QHBoxLayout();
+    btnRow->addStretch();
+    QPushButton *closeBtn = new QPushButton(tr("Close"), &dialog);
+    connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+    btnRow->addWidget(closeBtn);
+    layout->addLayout(btnRow);
+
+    dialog.exec();
 }
 
 void MainWindow::onAbout()
@@ -2002,6 +2131,19 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         m_graphView->resetTransform();
         m_graphView->scale(1.0, 1.0);
         return true;
+    }
+
+    // Handle double-click on historical count labels in swimlane
+    if (event->type() == QEvent::MouseButtonDblClick) {
+        QLabel *label = qobject_cast<QLabel*>(watched);
+        if (label && label->property("r2moPath").isValid()) {
+            const QString r2moPath = label->property("r2moPath").toString();
+            const QString projectName = label->property("projectName").toString();
+            if (!r2moPath.isEmpty()) {
+                showHistoricalTasksDialog(r2moPath, projectName.isEmpty() ? tr("Project") : projectName);
+                return true;
+            }
+        }
     }
     
     return QMainWindow::eventFilter(watched, event);
