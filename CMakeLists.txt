@@ -50,9 +50,11 @@ set(SOURCES
     src/utils/obsidianconfigreader.h
     src/utils/r2moscanner.cpp
     src/utils/r2moscanner.h
-    src/utils/aitoolscanner.cpp
-    src/utils/aitoolscanner.h
-    src/utils/gitscanner.cpp
+src/utils/aitoolscanner.cpp
+     src/utils/aitoolscanner.h
+     src/utils/sessionscanner.cpp
+     src/utils/sessionscanner.h
+     src/utils/gitscanner.cpp
     src/utils/gitscanner.h
 )
 
@@ -64,6 +66,7 @@ set(FONT_RESOURCES
 # AI tools icon resources
 set(AI_TOOLS_RESOURCES
     src/icons/ai-tools.qrc
+    src/icons/ui-icons.qrc
 )
 
 # Translation files

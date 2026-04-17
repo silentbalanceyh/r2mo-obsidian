@@ -22,6 +22,7 @@
 #include "utils/gitscanner.h"
 #include "utils/aitoolscanner.h"
 #include "utils/r2moscanner.h"
+#include "utils/sessionscanner.h"
 
 // Forward declarations
 class VaultModel;
@@ -77,6 +78,8 @@ private slots:
     void onThemeToggle();
     void onSwimlane();
     void onSwimlaneRefresh();
+    void onMonitorBoard();
+    void onMonitorRefresh();
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
@@ -107,12 +110,22 @@ private:
     void retranslateUi();
     void updateLanguageButtons();
     void updateThemeToggleIcon();
+    void updateToolbarIcons();
+    QIcon createSwimlaneIcon(const QColor &baseColor) const;
+    QIcon createMonitorIcon(const QColor &baseColor) const;
+    QIcon createHomeIcon(const QColor &baseColor) const;
     void openSwimlaneTab();
     void addSwimlaneCloseButton(int tabIndex);
     void refreshSwimlaneAsync();
     SwimlaneScanData collectSwimlaneData();
     QWidget* buildSwimlaneView(const SwimlaneScanData& data);
     QWidget* buildSwimlaneView();
+    void openMonitorTab();
+    void addMonitorCloseButton(int tabIndex);
+    void refreshMonitorAsync();
+    QList<QPair<QString, QString>> collectAllProjectPaths();
+    QWidget* buildMonitorView(const QList<ProjectMonitorData>& data);
+    void showSessionDetailDialog(const SessionInfo& session);
 
     // Toolbar
     QToolBar *m_toolBar;
@@ -123,11 +136,13 @@ private:
     QPushButton *m_addBtn;
     QPushButton *m_removeBtn;
     QPushButton *m_swimlaneBtn;
+    QPushButton *m_monitorBtn;
     
     // Main content tabs
     QTabWidget *m_mainTabWidget;
     QWidget *m_homeTabContent;
     QWidget *m_swimlaneTabContent;
+    QWidget *m_monitorTabContent;
     
     // Central widget
     QSplitter *m_splitter;
@@ -170,6 +185,14 @@ private:
     QLabel *m_loadingProgressLabel;
     int m_loadingProgressStep;
     QString m_currentPreviewPath;
+    int m_monitorTabIndex;
+    QWidget *m_monitorView;
+    QWidget *m_cachedMonitorWidget;
+    QTimer *m_monitorRefreshTimer;
+    QFutureWatcher<QList<ProjectMonitorData>> *m_monitorScanWatcher;
+    bool m_monitorRefreshing;
+    QLabel *m_monitorProgressLabel;
+    int m_monitorProgressStep;
 
     // Modules (not owned)
     VaultModel *m_vaultModel;

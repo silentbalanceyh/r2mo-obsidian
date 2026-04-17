@@ -6,6 +6,7 @@
 #include "utils/obsidianconfigreader.h"
 #include "utils/r2moscanner.h"
 #include "utils/aitoolscanner.h"
+#include "utils/sessionscanner.h"
 #include "utils/gitscanner.h"
 #include "i18n/translationmanager.h"
 
@@ -47,6 +48,8 @@
 #include <QToolButton>
 #include <QProgressBar>
 #include <QtConcurrent>
+#include <QPainter>
+#include <QPainterPath>
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
@@ -58,6 +61,7 @@ MainWindow::MainWindow(QWidget *parent)
      , m_addBtn(nullptr)
      , m_removeBtn(nullptr)
      , m_swimlaneBtn(nullptr)
+      , m_monitorBtn(nullptr)
      , m_splitter(nullptr)
      , m_vaultLabel(nullptr)
      , m_vaultList(nullptr)
@@ -88,15 +92,23 @@ MainWindow::MainWindow(QWidget *parent)
      , m_aiToolsTab(nullptr)
      , m_aiToolsEmptyLabel(nullptr)
      , m_aiToolsTree(nullptr)
-     , m_swimlaneTabIndex(-1)
-     , m_swimlaneView(nullptr)
-     , m_cachedSwimlaneWidget(nullptr)
-     , m_swimlaneRefreshTimer(nullptr)
-     , m_swimlaneScanWatcher(nullptr)
-     , m_swimlaneRefreshing(false)
-     , m_loadingProgressTimer(nullptr)
-     , m_loadingProgressLabel(nullptr)
-     , m_loadingProgressStep(0)
+, m_swimlaneTabIndex(-1)
+      , m_swimlaneView(nullptr)
+      , m_cachedSwimlaneWidget(nullptr)
+      , m_swimlaneRefreshTimer(nullptr)
+      , m_swimlaneScanWatcher(nullptr)
+      , m_swimlaneRefreshing(false)
+      , m_loadingProgressTimer(nullptr)
+      , m_loadingProgressLabel(nullptr)
+      , m_loadingProgressStep(0)
+      , m_monitorTabIndex(-1)
+      , m_monitorView(nullptr)
+      , m_cachedMonitorWidget(nullptr)
+      , m_monitorRefreshTimer(nullptr)
+      , m_monitorScanWatcher(nullptr)
+      , m_monitorRefreshing(false)
+      , m_monitorProgressLabel(nullptr)
+      , m_monitorProgressStep(0)
      , m_vaultModel(nullptr)
      , m_settingsManager(nullptr)
      , m_vaultValidator(nullptr)
@@ -127,6 +139,7 @@ MainWindow::MainWindow(QWidget *parent)
     setupConnections();
     updateVaultList();
     updateLanguageButtons();
+    updateToolbarIcons();
     
     // Set default window size: 1680 x 900
     resize(1680, 900);
@@ -234,13 +247,23 @@ void MainWindow::setupToolBar()
     divider1->setFixedSize(1, 24);
     leftLayout->addWidget(divider1);
     
-    // Swimlane button
+    // Swimlane button (dynamic icon)
     m_swimlaneBtn = new QPushButton();
-    m_swimlaneBtn->setText("📊");
     m_swimlaneBtn->setObjectName("swimlaneBtn");
     m_swimlaneBtn->setCursor(Qt::PointingHandCursor);
     m_swimlaneBtn->setToolTip(tr("Swimlane View"));
+    m_swimlaneBtn->setIconSize(QSize(20, 20));
+    m_swimlaneBtn->setFixedSize(32, 32);
     leftLayout->addWidget(m_swimlaneBtn);
+    
+    // Monitor Board button (dynamic icon) - directly adjacent to swimlane
+    m_monitorBtn = new QPushButton();
+    m_monitorBtn->setObjectName("monitorBtn");
+    m_monitorBtn->setCursor(Qt::PointingHandCursor);
+    m_monitorBtn->setToolTip(tr("Monitor Board"));
+    m_monitorBtn->setIconSize(QSize(20, 20));
+    m_monitorBtn->setFixedSize(32, 32);
+    leftLayout->addWidget(m_monitorBtn);
     
     m_toolBar->addWidget(leftControls);
     
@@ -310,6 +333,9 @@ void MainWindow::setupToolBar()
     // Connect Swimlane button
     connect(m_swimlaneBtn, &QPushButton::clicked, this, &MainWindow::onSwimlane);
     
+    // Connect Monitor Board button
+    connect(m_monitorBtn, &QPushButton::clicked, this, &MainWindow::onMonitorBoard);
+    
     // Set initial language selection
     updateLanguageButtons();
 }
@@ -326,6 +352,142 @@ void MainWindow::updateThemeToggleIcon()
         m_themeBtn->setText("☀️");
         m_themeBtn->setToolTip(tr("Switch to Light Mode"));
     }
+}
+
+void MainWindow::updateToolbarIcons()
+{
+    QColor baseColor = (ThemeManager::instance()->currentTheme() == ThemeManager::Light)
+        ? QColor("#333333") : QColor("#f5f5f7");
+    
+    m_swimlaneBtn->setIcon(createSwimlaneIcon(baseColor));
+    m_monitorBtn->setIcon(createMonitorIcon(baseColor));
+    
+    int homeIdx = m_mainTabWidget->indexOf(m_homeTabContent);
+    if (homeIdx >= 0) {
+        m_mainTabWidget->setTabIcon(homeIdx, createHomeIcon(baseColor));
+    }
+}
+
+QIcon MainWindow::createSwimlaneIcon(const QColor &baseColor) const
+{
+    const int sz = 24;
+    const qreal dpr = devicePixelRatioF();
+    QPixmap pixmap(qRound(sz * dpr), qRound(sz * dpr));
+    pixmap.setDevicePixelRatio(dpr);
+    pixmap.fill(Qt::transparent);
+    QPainter p(&pixmap);
+    p.setRenderHint(QPainter::Antialiasing);
+    
+    QPen pen(baseColor, 1.5);
+    pen.setCosmetic(true);
+    
+    // Outer frame
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(QRectF(1.5, 1.5, 21, 21), 2.5, 2.5);
+    
+    // Vertical bars
+    p.setPen(Qt::NoPen);
+    p.setBrush(baseColor);
+    p.drawRect(QRectF(4.5, 13, 3, 7));
+    p.drawRect(QRectF(10, 8, 3, 12));
+    p.drawRect(QRectF(15.5, 10.5, 3, 9.5));
+    
+    // Dot markers
+    p.setBrush(QColor("#007aff"));
+    p.drawEllipse(QRectF(4, 9.5, 4, 4));
+    p.setBrush(QColor("#34c759"));
+    p.drawEllipse(QRectF(9.5, 5, 4, 4));
+    p.setBrush(QColor("#ff9500"));
+    p.drawEllipse(QRectF(15, 7.5, 4, 4));
+    
+    p.end();
+    return QIcon(pixmap);
+}
+
+QIcon MainWindow::createMonitorIcon(const QColor &baseColor) const
+{
+    const int sz = 24;
+    const qreal dpr = devicePixelRatioF();
+    QPixmap pixmap(qRound(sz * dpr), qRound(sz * dpr));
+    pixmap.setDevicePixelRatio(dpr);
+    pixmap.fill(Qt::transparent);
+    QPainter p(&pixmap);
+    p.setRenderHint(QPainter::Antialiasing);
+    
+    QPen pen(baseColor, 1.5);
+    pen.setCosmetic(true);
+    
+    // Screen frame
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(QRectF(1.5, 2.5, 21, 17), 2.5, 2.5);
+    
+    // Stand
+    p.setPen(Qt::NoPen);
+    p.setBrush(baseColor);
+    p.drawRect(QRectF(9, 19.5, 6, 1.5));
+    p.drawRect(QRectF(7, 21, 10, 1));
+    
+    // Status dots
+    p.setBrush(QColor("#ff3b30"));
+    p.drawEllipse(QRectF(4.5, 5, 3.5, 3.5));
+    p.setBrush(QColor("#ff9500"));
+    p.drawEllipse(QRectF(10, 5, 3.5, 3.5));
+    p.setBrush(QColor("#34c759"));
+    p.drawEllipse(QRectF(15.5, 5, 3.5, 3.5));
+    
+    // Session cards
+    p.setBrush(QColor("#34c759"));
+    p.drawRoundedRect(QRectF(4, 10.5, 6.5, 3), 0.8, 0.8);
+    p.setBrush(QColor("#007aff"));
+    p.drawRoundedRect(QRectF(12.5, 10.5, 6.5, 3), 0.8, 0.8);
+    p.setBrush(QColor("#007aff"));
+    p.drawRoundedRect(QRectF(4, 14.5, 6.5, 3), 0.8, 0.8);
+    p.setBrush(QColor("#34c759"));
+    p.drawRoundedRect(QRectF(12.5, 14.5, 6.5, 3), 0.8, 0.8);
+    
+    p.end();
+    return QIcon(pixmap);
+}
+
+QIcon MainWindow::createHomeIcon(const QColor &baseColor) const
+{
+    const int sz = 20;
+    const qreal dpr = devicePixelRatioF();
+    QPixmap pixmap(qRound(sz * dpr), qRound(sz * dpr));
+    pixmap.setDevicePixelRatio(dpr);
+    pixmap.fill(Qt::transparent);
+    QPainter p(&pixmap);
+    p.setRenderHint(QPainter::Antialiasing);
+    
+    QPen pen(baseColor, 1.2);
+    pen.setCosmetic(true);
+    pen.setJoinStyle(Qt::RoundJoin);
+    pen.setCapStyle(Qt::RoundCap);
+    
+    // Roof
+    QPainterPath roof;
+    roof.moveTo(10, 2);
+    roof.lineTo(18, 9);
+    roof.lineTo(2, 9);
+    roof.closeSubpath();
+    p.setPen(pen);
+    p.setBrush(baseColor);
+    p.drawPath(roof);
+    
+    // Body (house wall)
+    p.setPen(Qt::NoPen);
+    p.setBrush(baseColor);
+    p.drawRect(QRectF(4, 9, 12, 8));
+    
+    // Door cutout (transparent)
+    p.setCompositionMode(QPainter::CompositionMode_Source);
+    p.setBrush(Qt::transparent);
+    p.drawRect(QRectF(7.5, 12, 5, 5));
+    
+    p.end();
+    return QIcon(pixmap);
 }
 
 void MainWindow::updateLanguageButtons()
@@ -508,7 +670,7 @@ void MainWindow::setupCentralWidget()
     QVBoxLayout *vaultCardLayout = new QVBoxLayout(m_vaultStatsCard);
     vaultCardLayout->setContentsMargins(0, 0, 0, 0);
     vaultCardLayout->setSpacing(0);
-    m_vaultStatsHeader = new QLabel(tr("📊 Vault Statistics"));
+    m_vaultStatsHeader = new QLabel(tr("Vault Statistics"));
     m_vaultStatsHeader->setStyleSheet("QLabel { background: #f5f5f7; color: #1d1d1f; font-size: 15px; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e0e0e0; }");
     vaultCardLayout->addWidget(m_vaultStatsHeader);
     m_vaultStatsBody = new QWidget;
@@ -527,7 +689,7 @@ void MainWindow::setupCentralWidget()
     QVBoxLayout *r2moCardLayout = new QVBoxLayout(m_r2moStatsCard);
     r2moCardLayout->setContentsMargins(0, 0, 0, 0);
     r2moCardLayout->setSpacing(0);
-    m_r2moStatsHeader = new QLabel(tr("🔧 R2MO Statistics"));
+    m_r2moStatsHeader = new QLabel(tr("R2MO Statistics"));
     m_r2moStatsHeader->setStyleSheet("QLabel { background: #f5f5f7; color: #1d1d1f; font-size: 15px; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e0e0e0; }");
     r2moCardLayout->addWidget(m_r2moStatsHeader);
     m_r2moStatsBody = new QWidget;
@@ -636,9 +798,13 @@ void MainWindow::setupCentralWidget()
         "QTabWidget#mainTabs QTabBar::close-button { width: 14px; height: 14px; subcontrol-position: right; }"
     );
     m_homeTabContent = homeTabContent;
-    m_mainTabWidget->addTab(m_homeTabContent, tr("🏠 HOME"));
+    m_mainTabWidget->addTab(m_homeTabContent, tr("HOME"));
+    m_mainTabWidget->setTabIcon(0, createHomeIcon(
+        (ThemeManager::instance()->currentTheme() == ThemeManager::Light)
+            ? QColor("#333333") : QColor("#f5f5f7")));
     
     m_swimlaneTabContent = nullptr;
+    m_monitorTabContent = nullptr;
     
     mainLayout->addWidget(m_mainTabWidget, 1);
 
@@ -686,6 +852,35 @@ void MainWindow::setupConnections()
         }
     });
     
+    // Monitor refresh timer (15 seconds)
+    m_monitorRefreshTimer = new QTimer(this);
+    m_monitorRefreshTimer->setInterval(15000);
+    connect(m_monitorRefreshTimer, &QTimer::timeout, this, &MainWindow::onMonitorRefresh);
+    m_monitorRefreshTimer->start();
+    
+    // Monitor scan watcher for async refresh
+    m_monitorScanWatcher = new QFutureWatcher<QList<ProjectMonitorData>>(this);
+    connect(m_monitorScanWatcher, &QFutureWatcher<QList<ProjectMonitorData>>::finished, this, [this]() {
+        if (m_monitorRefreshing) {
+            QList<ProjectMonitorData> data = m_monitorScanWatcher->result();
+            QWidget *newWidget = buildMonitorView(data);
+            
+            m_cachedMonitorWidget = newWidget;
+            
+            if (m_monitorTabContent && m_mainTabWidget->indexOf(m_monitorTabContent) >= 0) {
+                int idx = m_mainTabWidget->indexOf(m_monitorTabContent);
+                if (m_mainTabWidget->currentIndex() == idx) {
+                    m_mainTabWidget->removeTab(idx);
+                    m_monitorTabContent = newWidget;
+                    int newIdx = m_mainTabWidget->addTab(m_monitorTabContent, tr("Monitor Board"));
+                    addMonitorCloseButton(newIdx);
+                    m_mainTabWidget->setCurrentIndex(newIdx);
+                }
+            }
+            m_monitorRefreshing = false;
+        }
+    });
+    
     // Swimlane scan watcher for async refresh
     m_swimlaneScanWatcher = new QFutureWatcher<SwimlaneScanData>(this);
     connect(m_swimlaneScanWatcher, &QFutureWatcher<SwimlaneScanData>::finished, this, [this]() {
@@ -707,7 +902,7 @@ void MainWindow::setupConnections()
                 if (m_mainTabWidget->currentIndex() == idx) {
                     m_mainTabWidget->removeTab(idx);
                     m_swimlaneTabContent = newWidget;
-                    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+                    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
                     addSwimlaneCloseButton(newIdx);
                     m_mainTabWidget->setCurrentIndex(newIdx);
                 }
@@ -1802,6 +1997,7 @@ void MainWindow::onThemeChanged(ThemeManager::Theme theme)
     // Apply new theme style
     setStyleSheet(ThemeManager::instance()->currentStyle());
     updateThemeToggleIcon();
+    updateToolbarIcons();
 }
 
 void MainWindow::onThemeToggle()
@@ -1835,7 +2031,7 @@ void MainWindow::onSwimlane()
 {
     if (m_cachedSwimlaneWidget) {
         m_swimlaneTabContent = m_cachedSwimlaneWidget;
-        int idx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+        int idx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
         addSwimlaneCloseButton(idx);
         m_mainTabWidget->setCurrentIndex(idx);
         return;
@@ -1884,7 +2080,7 @@ void MainWindow::onSwimlane()
     loadingLayout->addWidget(hintLabel);
     
     m_swimlaneTabContent = loadingWidget;
-    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
     addSwimlaneCloseButton(newIdx);
     m_mainTabWidget->setCurrentIndex(newIdx);
     
@@ -2067,11 +2263,11 @@ QWidget* MainWindow::buildSwimlaneView(const SwimlaneScanData& scanData)
 
     // Legend + Refresh button
     QHBoxLayout *legendLayout = new QHBoxLayout();
-    QLabel *legendLabel = new QLabel(tr("🟠 Running Tasks"));
+    QLabel *legendLabel = new QLabel(tr("Running Tasks"));
     legendLabel->setStyleSheet("QLabel { color: #86868b; font-size: 11px; background: white; }");
     legendLayout->addWidget(legendLabel);
     
-    QPushButton *refreshBtn = new QPushButton(tr("🔄 Refresh"));
+    QPushButton *refreshBtn = new QPushButton(tr("Refresh"));
     refreshBtn->setFixedSize(QSize(80, 24));
     refreshBtn->setCursor(Qt::PointingHandCursor);
     refreshBtn->setStyleSheet("QPushButton { background: #f5f5f7; color: #86868b; font-size: 11px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 2px 8px; } QPushButton:hover { background: #e8e8ed; color: #333; } QPushButton:disabled { background: #f5f5f7; color: #c0c0c0; }");
@@ -2356,7 +2552,7 @@ void MainWindow::refreshSwimlaneAsync()
     m_cachedSwimlaneWidget = m_swimlaneTabContent;
     m_mainTabWidget->removeTab(idx);
     m_swimlaneTabContent = loadingOverlay;
-    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("📊 泳道图"));
+    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
     addSwimlaneCloseButton(newIdx);
     m_mainTabWidget->setCurrentIndex(newIdx);
     
@@ -2682,4 +2878,403 @@ void MainWindow::onSwimlaneRefresh()
         return this->collectSwimlaneData();
     });
     m_swimlaneScanWatcher->setFuture(future);
+}
+
+void MainWindow::addMonitorCloseButton(int tabIndex)
+{
+    QToolButton *closeBtn = new QToolButton();
+    closeBtn->setText("×");
+    closeBtn->setFixedSize(QSize(14, 14));
+    closeBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    closeBtn->setCursor(Qt::PointingHandCursor);
+    closeBtn->setStyleSheet("QToolButton { background: transparent; color: #86868b; font-size: 12px; font-weight: bold; border: none; padding: 0; margin: 0; margin-right: 4px; } QToolButton:hover { background: #ff3b30; color: white; border-radius: 2px; }");
+    connect(closeBtn, &QToolButton::clicked, this, [this]() {
+        int idx = m_mainTabWidget->indexOf(m_monitorTabContent);
+        if (idx > 0) {
+            m_mainTabWidget->removeTab(idx);
+            m_cachedMonitorWidget = m_monitorTabContent;
+            m_monitorTabContent = nullptr;
+        }
+    });
+    m_mainTabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeBtn);
+}
+
+QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths()
+{
+    QList<QPair<QString, QString>> result;
+    QList<Vault> vaults = m_vaultModel->vaults();
+    
+    for (const Vault& vault : vaults) {
+        QDir vaultDir(vault.path);
+        if (!vaultDir.exists() || !m_vaultValidator->hasR2moConfig(vault.path)) {
+            continue;
+        }
+        R2moScanner scanner;
+        QList<R2moSubProject> projects = scanner.scanVault(vault.path);
+        
+        for (const R2moSubProject& proj : projects) {
+            result.append(qMakePair(proj.name, proj.path));
+        }
+    }
+    
+    return result;
+}
+
+void MainWindow::onMonitorBoard()
+{
+    if (m_cachedMonitorWidget) {
+        m_monitorTabContent = m_cachedMonitorWidget;
+        int idx = m_mainTabWidget->addTab(m_monitorTabContent, tr("Monitor Board"));
+        addMonitorCloseButton(idx);
+        m_mainTabWidget->setCurrentIndex(idx);
+        return;
+    }
+    
+    openMonitorTab();
+}
+
+void MainWindow::openMonitorTab()
+{
+    if (m_monitorRefreshing) return;
+    m_monitorRefreshing = true;
+    
+    QWidget *loadingWidget = new QWidget();
+    loadingWidget->setStyleSheet("background: white;");
+    QVBoxLayout *loadingLayout = new QVBoxLayout(loadingWidget);
+    loadingLayout->setAlignment(Qt::AlignCenter);
+    loadingLayout->setSpacing(16);
+    
+    QLabel *iconLabel = new QLabel();
+    iconLabel->setAlignment(Qt::AlignCenter);
+    QPixmap monitorPix(":/icons/monitor.svg");
+    if (!monitorPix.isNull()) {
+        iconLabel->setPixmap(monitorPix.scaled(48, 48, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+    loadingLayout->addWidget(iconLabel);
+    
+    QLabel *titleLabel = new QLabel(tr("Loading Monitor Board"));
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet("QLabel { color: #333; font-size: 18px; font-weight: 600; background: transparent; }");
+    loadingLayout->addWidget(titleLabel);
+    
+    m_monitorProgressLabel = new QLabel(tr("Scanning AI sessions..."));
+    m_monitorProgressLabel->setAlignment(Qt::AlignCenter);
+    m_monitorProgressLabel->setStyleSheet("QLabel { color: #86868b; font-size: 14px; background: transparent; }");
+    loadingLayout->addWidget(m_monitorProgressLabel);
+    
+    QProgressBar *progressBar = new QProgressBar();
+    progressBar->setRange(0, 0);
+    progressBar->setFixedWidth(300);
+    progressBar->setTextVisible(false);
+    progressBar->setStyleSheet("QProgressBar { border: 1px solid #e0e0e0; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #34c759; border-radius: 3px; }");
+    loadingLayout->addWidget(progressBar);
+    
+    m_monitorTabContent = loadingWidget;
+    int newIdx = m_mainTabWidget->addTab(m_monitorTabContent, tr("Monitor Board"));
+    addMonitorCloseButton(newIdx);
+    m_mainTabWidget->setCurrentIndex(newIdx);
+    
+    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
+        QList<QPair<QString, QString>> projects = collectAllProjectPaths();
+        SessionScanner scanner;
+        return scanner.scanAllProjects(projects);
+    });
+    m_monitorScanWatcher->setFuture(future);
+    
+    if (m_monitorRefreshTimer) {
+        m_monitorRefreshTimer->start();
+    }
+}
+
+void MainWindow::onMonitorRefresh()
+{
+    if (m_monitorRefreshing) return;
+    
+    m_monitorRefreshing = true;
+    
+    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
+        QList<QPair<QString, QString>> projects = collectAllProjectPaths();
+        SessionScanner scanner;
+        return scanner.scanAllProjects(projects);
+    });
+    m_monitorScanWatcher->setFuture(future);
+}
+
+void MainWindow::refreshMonitorAsync()
+{
+    if (m_monitorRefreshing) return;
+    if (!m_monitorTabContent) return;
+    
+    int idx = m_mainTabWidget->indexOf(m_monitorTabContent);
+    if (idx < 0) return;
+    
+    m_monitorRefreshing = true;
+    
+    QWidget *loadingOverlay = new QWidget();
+    loadingOverlay->setStyleSheet("background: rgba(255, 255, 255, 0.95);");
+    QVBoxLayout *overlayLayout = new QVBoxLayout(loadingOverlay);
+    overlayLayout->setAlignment(Qt::AlignCenter);
+    overlayLayout->setSpacing(16);
+    
+    QLabel *titleLabel = new QLabel(tr("Refreshing Monitor Board"));
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet("QLabel { color: #333; font-size: 18px; font-weight: 600; background: transparent; }");
+    overlayLayout->addWidget(titleLabel);
+    
+    m_monitorProgressLabel = new QLabel(tr("Scanning sessions..."));
+    m_monitorProgressLabel->setAlignment(Qt::AlignCenter);
+    m_monitorProgressLabel->setStyleSheet("QLabel { color: #86868b; font-size: 14px; background: transparent; }");
+    overlayLayout->addWidget(m_monitorProgressLabel);
+    
+    QProgressBar *progressBar = new QProgressBar();
+    progressBar->setRange(0, 0);
+    progressBar->setFixedWidth(300);
+    progressBar->setTextVisible(false);
+    progressBar->setStyleSheet("QProgressBar { border: 1px solid #e0e0e0; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #34c759; border-radius: 3px; }");
+    overlayLayout->addWidget(progressBar);
+    
+    m_cachedMonitorWidget = m_monitorTabContent;
+    m_mainTabWidget->removeTab(idx);
+    m_monitorTabContent = loadingOverlay;
+    int newIdx = m_mainTabWidget->addTab(m_monitorTabContent, tr("Monitor Board"));
+    addMonitorCloseButton(newIdx);
+    m_mainTabWidget->setCurrentIndex(newIdx);
+    
+    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
+        QList<QPair<QString, QString>> projects = collectAllProjectPaths();
+        SessionScanner scanner;
+        return scanner.scanAllProjects(projects);
+    });
+    m_monitorScanWatcher->setFuture(future);
+}
+
+QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorData)
+{
+    QWidget *container = new QWidget();
+    container->setStyleSheet("background: white;");
+    QVBoxLayout *mainLayout = new QVBoxLayout(container);
+    mainLayout->setContentsMargins(16, 12, 16, 12);
+    mainLayout->setSpacing(8);
+
+    QList<Vault> vaults = m_vaultModel->vaults();
+    if (vaults.isEmpty()) {
+        QLabel *emptyLabel = new QLabel(tr("No vaults added. Add a vault to see monitor board."));
+        emptyLabel->setAlignment(Qt::AlignCenter);
+        emptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 40px; background: white; }");
+        mainLayout->addWidget(emptyLabel);
+        return container;
+    }
+
+    // Legend + Refresh
+    QHBoxLayout *legendLayout = new QHBoxLayout();
+
+    QLabel *workingLegend = new QLabel();
+    workingLegend->setStyleSheet("QLabel { background: transparent; border: none; }");
+    workingLegend->setText(QString("<span style='color: #34c759; font-size: 14px;'>&#9679;</span> <span style='color: #86868b; font-size: 11px;'>%1</span>").arg(tr("Working")));
+    legendLayout->addWidget(workingLegend);
+
+    QLabel *readyLegend = new QLabel();
+    readyLegend->setStyleSheet("QLabel { background: transparent; border: none; }");
+    readyLegend->setText(QString("<span style='color: #007aff; font-size: 14px;'>&#9679;</span> <span style='color: #86868b; font-size: 11px;'>%1</span>").arg(tr("Ready")));
+    legendLayout->addWidget(readyLegend);
+
+    legendLayout->addStretch();
+
+    QPushButton *refreshBtn = new QPushButton(tr("Refresh"));
+    refreshBtn->setFixedSize(QSize(80, 24));
+    refreshBtn->setCursor(Qt::PointingHandCursor);
+    refreshBtn->setStyleSheet("QPushButton { background: #f5f5f7; color: #86868b; font-size: 11px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 2px 8px; } QPushButton:hover { background: #e8e8ed; color: #333; }");
+    refreshBtn->setProperty("isMonitorRefreshBtn", true);
+    legendLayout->addWidget(refreshBtn);
+
+    mainLayout->addLayout(legendLayout);
+
+    // Single tree widget
+    QTreeWidget *tree = new QTreeWidget();
+    tree->setHeaderLabels(QStringList() << tr("Project") << tr("Terminal") << tr("AI Tool") << tr("Session / Status"));
+    tree->setRootIsDecorated(true);
+    tree->setAlternatingRowColors(true);
+    tree->setUniformRowHeights(false);
+    tree->setSelectionMode(QAbstractItemView::SingleSelection);
+    tree->header()->setStretchLastSection(true);
+    tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    tree->setStyleSheet(
+        "QTreeWidget { border: 1px solid #e8e8ed; border-radius: 6px; background: white; }"
+        "QTreeWidget::item { padding: 4px 8px; border-bottom: 1px solid #f5f5f7; }"
+        "QTreeWidget::item:selected { background: #e8f4fd; color: #1d1d1f; }"
+        "QHeaderView::section { background: #f5f5f7; color: #86868b; font-size: 12px; font-weight: 600; padding: 6px 8px; border: none; border-bottom: 1px solid #e0e0e0; }"
+    );
+
+    if (monitorData.isEmpty()) {
+        QTreeWidgetItem *emptyItem = new QTreeWidgetItem(tree);
+        emptyItem->setText(0, tr("No active AI sessions detected."));
+        emptyItem->setForeground(0, QColor("#86868b"));
+        QTreeWidgetItem *hintItem = new QTreeWidgetItem(tree);
+        hintItem->setText(0, tr("WezTerm, iTerm2, Terminal.app sessions are monitored."));
+        hintItem->setForeground(0, QColor("#86868b"));
+    } else {
+        for (const ProjectMonitorData& pmd : monitorData) {
+            QTreeWidgetItem *projItem = new QTreeWidgetItem(tree);
+            projItem->setText(0, pmd.projectName);
+
+            // Summary badges in Session column
+            QStringList badges;
+            if (pmd.totalWorking > 0) badges << QString("%1 Working").arg(pmd.totalWorking);
+            if (pmd.totalReady > 0) badges << QString("%1 Ready").arg(pmd.totalReady);
+            if (!badges.isEmpty()) {
+                projItem->setText(3, badges.join("  "));
+            }
+
+            QFont projFont = projItem->font(0);
+            projFont.setBold(true);
+            projFont.setPointSize(13);
+            projItem->setFont(0, projFont);
+            projItem->setData(0, Qt::UserRole, pmd.projectPath);
+
+            for (const ToolSessionSummary& tss : pmd.toolSummaries) {
+                for (const SessionInfo& si : tss.sessions) {
+                    QTreeWidgetItem *sessionItem = new QTreeWidgetItem(projItem);
+                    sessionItem->setText(0, QString()); // blank under project
+                    sessionItem->setText(1, si.terminalName);
+                    sessionItem->setText(2, si.toolName);
+
+                    // Status dot + session detail
+                    QString statusColor;
+                    QString statusText;
+                    if (si.status == SessionStatus::Working) {
+                        statusColor = "#34c759";
+                        statusText = tr("Working");
+                    } else if (si.status == SessionStatus::Ready) {
+                        statusColor = "#007aff";
+                        statusText = tr("Ready");
+                    } else {
+                        statusColor = "#86868b";
+                        statusText = tr("Unknown");
+                    }
+
+                    QString sessionDetail;
+                    if (!si.detailText.isEmpty()) {
+                        sessionDetail = si.detailText;
+                    } else if (!si.sessionPath.isEmpty()) {
+                        sessionDetail = si.sessionPath;
+                    }
+
+                    QString sessionCol = QString("<span style='color: %1;'>&#9679;</span> %2").arg(statusColor, statusText);
+                    if (!sessionDetail.isEmpty()) {
+                        sessionCol += QString(" <span style='color: #86868b; font-size: 11px;'>%1</span>").arg(sessionDetail);
+                    }
+                    if (si.lastActivity.isValid()) {
+                        sessionCol += QString(" <span style='color: #86868b; font-size: 11px;'>%1</span>").arg(si.lastActivity.toString("yyyy-MM-dd HH:mm"));
+                    }
+
+                    QLabel *sessionLabel = new QLabel();
+                    sessionLabel->setText(sessionCol);
+                    sessionLabel->setStyleSheet("QLabel { background: transparent; border: none; }");
+                    tree->setItemWidget(sessionItem, 3, sessionLabel);
+
+                    sessionItem->setData(0, Qt::UserRole, si.projectPath);
+                    sessionItem->setData(1, Qt::UserRole, si.terminalName);
+                    sessionItem->setData(2, Qt::UserRole, si.toolName);
+                    sessionItem->setData(3, Qt::UserRole, si.detailText);
+                    sessionItem->setData(0, Qt::UserRole + 1, si.sessionPath);
+                    sessionItem->setData(0, Qt::UserRole + 2, static_cast<int>(si.status));
+                }
+            }
+
+            projItem->setExpanded(true);
+        }
+    }
+
+    connect(tree, &QTreeWidget::itemDoubleClicked, this, [this, tree](QTreeWidgetItem *item, int) {
+        if (!item) return;
+        // Only show detail for session-level items (children)
+        if (item->parent() == nullptr) return;
+
+        SessionInfo si;
+        si.projectPath = item->data(0, Qt::UserRole).toString();
+        si.terminalName = item->data(1, Qt::UserRole).toString();
+        si.toolName = item->data(2, Qt::UserRole).toString();
+        si.detailText = item->data(3, Qt::UserRole).toString();
+        si.sessionPath = item->data(0, Qt::UserRole + 1).toString();
+        si.status = static_cast<SessionStatus>(item->data(0, Qt::UserRole + 2).toInt());
+        if (item->parent()) {
+            si.projectName = item->parent()->text(0);
+        }
+        showSessionDetailDialog(si);
+    });
+
+    mainLayout->addWidget(tree, 1);
+
+    QPushButton *btn = container->findChild<QPushButton*>("", Qt::FindDirectChildrenOnly);
+    if (btn && btn->property("isMonitorRefreshBtn").toBool()) {
+        connect(btn, &QPushButton::clicked, this, &MainWindow::refreshMonitorAsync);
+    }
+
+    return container;
+}
+
+void MainWindow::showSessionDetailDialog(const SessionInfo& session)
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Session Detail - %1").arg(session.toolName));
+    dialog.setMinimumSize(600, 400);
+    dialog.resize(700, 500);
+    dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
+    
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(12);
+    
+    QLabel *headerLabel = new QLabel(QString("<h3>%1</h3>").arg(session.toolName));
+    headerLabel->setStyleSheet("QLabel { color: #1d1d1f; }");
+    layout->addWidget(headerLabel);
+    
+    QGridLayout *grid = new QGridLayout();
+    grid->setSpacing(8);
+    
+    auto addRow = [&](int row, const QString& label, const QString& value) {
+        QLabel *lbl = new QLabel(label);
+        lbl->setStyleSheet("QLabel { color: #86868b; font-size: 13px; }");
+        grid->addWidget(lbl, row, 0);
+        QLabel *val = new QLabel(value);
+        val->setWordWrap(true);
+        val->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        val->setStyleSheet("QLabel { color: #1d1d1f; font-size: 13px; }");
+        grid->addWidget(val, row, 1);
+    };
+    
+    addRow(0, tr("Tool"), session.toolName);
+    addRow(1, tr("Project"), session.projectName);
+    addRow(2, tr("Project Path"), session.projectPath);
+    
+    QString statusText;
+    if (session.status == SessionStatus::Working) {
+        statusText = tr("Working");
+    } else if (session.status == SessionStatus::Ready) {
+        statusText = tr("Ready");
+    } else {
+        statusText = tr("Unknown");
+    }
+    addRow(3, tr("Status"), statusText);
+    addRow(4, tr("Terminal"), session.terminalName);
+    addRow(5, tr("Last Activity"), session.lastActivity.toString("yyyy-MM-dd HH:mm:ss"));
+    addRow(6, tr("Session Path"), session.sessionPath);
+    addRow(7, tr("Detail"), session.detailText);
+    
+    layout->addLayout(grid);
+    
+    layout->addStretch();
+    
+    QHBoxLayout *btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
+    QPushButton *closeBtn = new QPushButton(tr("Close"), &dialog);
+    closeBtn->setFixedWidth(80);
+    connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+    btnLayout->addWidget(closeBtn);
+    layout->addLayout(btnLayout);
+    
+    dialog.setStyleSheet(ThemeManager::instance()->currentStyle());
+    dialog.exec();
 }

@@ -1,0 +1,8 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/icons">
+        <file>ui/swimlane.svg</file>
+        <file>ui/monitor.svg</file>
+        <file>ui/home.svg</file>
+    </qresource>
+</RCC>

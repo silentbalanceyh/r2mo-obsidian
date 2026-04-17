@@ -600,6 +600,21 @@ QPushButton#swimlaneBtn {
 QPushButton#swimlaneBtn:hover {
     background-color: rgba(0, 0, 0, 0.04);
 }
+
+QPushButton#monitorBtn {
+    background-color: transparent;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 3px;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#monitorBtn:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+}
 )";
 }
 
@@ -1156,6 +1171,21 @@ QPushButton#swimlaneBtn {
 }
 
 QPushButton#swimlaneBtn:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+QPushButton#monitorBtn {
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#monitorBtn:hover {
     background-color: rgba(255, 255, 255, 0.05);
 }
 )";
