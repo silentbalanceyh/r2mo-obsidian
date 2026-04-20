@@ -38,6 +38,8 @@
 #include <QDir>
 #include <QProcess>
 #include <QButtonGroup>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QTabWidget>
 #include <QWheelEvent>
 #include <QMouseEvent>
@@ -50,6 +52,8 @@
 #include <QtConcurrent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QRegularExpression>
+#include <QSignalBlocker>
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
@@ -564,10 +568,15 @@ void MainWindow::setupCentralWidget()
     m_vaultList = new QListWidget;
     m_vaultList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_vaultList->setMinimumWidth(320);
-    m_vaultList->setSpacing(4);
+    m_vaultList->setSpacing(1);
     m_vaultList->setContextMenuPolicy(Qt::CustomContextMenu);
     m_vaultList->setEditTriggers(QAbstractItemView::EditKeyPressed);
-    m_vaultList->setStyleSheet("QListWidget::item { min-height: 36px; padding: 8px 12px; border-radius: 3px; } QListWidget::item:selected { background: #007aff; color: white; }");
+    m_vaultList->setDragEnabled(true);
+    m_vaultList->setAcceptDrops(true);
+    m_vaultList->setDropIndicatorShown(true);
+    m_vaultList->setDefaultDropAction(Qt::MoveAction);
+    m_vaultList->setDragDropMode(QAbstractItemView::InternalMove);
+    m_vaultList->setStyleSheet("QListWidget::item { min-height: 30px; padding: 5px 10px; border-radius: 3px; } QListWidget::item:selected { background: #007aff; color: white; }");
 
     QGraphicsDropShadowEffect *listShadow = new QGraphicsDropShadowEffect;
     listShadow->setBlurRadius(20);
@@ -817,6 +826,12 @@ void MainWindow::setupConnections()
     connect(m_vaultList, &QListWidget::itemDoubleClicked, this, &MainWindow::onVaultDoubleClicked);
     connect(m_vaultList, &QListWidget::customContextMenuRequested, this, &MainWindow::onVaultContextMenu);
     connect(m_vaultList, &QListWidget::itemChanged, this, &MainWindow::onVaultItemChanged);
+    connect(m_vaultList->model(), &QAbstractItemModel::rowsMoved, this,
+            [this](const QModelIndex&, int, int, const QModelIndex&, int) {
+                QTimer::singleShot(0, this, [this]() {
+                    syncVaultOrderFromList();
+                });
+            });
     connect(m_previewEditBtn, &QPushButton::clicked, this, &MainWindow::onPreviewEditClicked);
     connect(m_previewOpenBtn, &QPushButton::clicked, this, &MainWindow::onPreviewOpenClicked);
     connect(m_previewTitleEdit, &QLineEdit::editingFinished, this, &MainWindow::onPreviewTitleEditFinished);
@@ -904,23 +919,91 @@ void MainWindow::setupConnections()
 
 void MainWindow::updateVaultList()
 {
+    const QString preferredPath = m_currentPreviewPath.isEmpty()
+        ? m_settingsManager->lastVaultPath()
+        : m_currentPreviewPath;
+
+    const QSignalBlocker blocker(m_vaultList);
     m_vaultList->clear();
     
     QList<Vault> vaults = m_vaultModel->vaults();
+    QListWidgetItem *selectedItem = nullptr;
     for (const Vault& v : vaults) {
         QListWidgetItem *item = new QListWidgetItem(v.name);
         item->setData(Qt::UserRole, v.path);
         item->setToolTip(v.path);
         item->setFlags(item->flags() | Qt::ItemIsEditable);
         m_vaultList->addItem(item);
+        if (!preferredPath.isEmpty() && v.path == preferredPath) {
+            selectedItem = item;
+        }
     }
+
+    if (!selectedItem && !preferredPath.isEmpty()) {
+        for (int i = 0; i < m_vaultList->count(); ++i) {
+            QListWidgetItem *item = m_vaultList->item(i);
+            if (item && item->data(Qt::UserRole).toString() == preferredPath) {
+                selectedItem = item;
+                break;
+            }
+        }
+    }
+
+    if (selectedItem) {
+        m_vaultList->setCurrentItem(selectedItem);
+        updatePreviewPane(selectedItem->text(), selectedItem->data(Qt::UserRole).toString());
+    } else if (vaults.isEmpty()) {
+        m_currentPreviewPath.clear();
+        setOverviewEmptyState(true);
+    }
+
+    invalidateMonitorView(m_monitorTabContent != nullptr);
+}
+
+void MainWindow::syncVaultOrderFromList()
+{
+    QStringList orderedPaths;
+    orderedPaths.reserve(m_vaultList->count());
+    for (int i = 0; i < m_vaultList->count(); ++i) {
+        QListWidgetItem *item = m_vaultList->item(i);
+        if (!item) {
+            continue;
+        }
+        orderedPaths.append(item->data(Qt::UserRole).toString());
+    }
+
+    if (orderedPaths.size() != m_vaultModel->count()) {
+        return;
+    }
+
+    m_vaultModel->reorderVaults(orderedPaths);
+    m_vaultModel->save(m_configPath);
+}
+
+void MainWindow::invalidateMonitorView(bool refreshIfOpen)
+{
+    if (m_cachedMonitorWidget && m_cachedMonitorWidget != m_monitorTabContent) {
+        m_cachedMonitorWidget->deleteLater();
+    }
+
+    if (!m_monitorTabContent) {
+        m_cachedMonitorWidget = nullptr;
+        return;
+    }
+
+    if (refreshIfOpen && !m_monitorRefreshing) {
+        refreshMonitorAsync();
+        return;
+    }
+
+    m_cachedMonitorWidget = m_monitorTabContent;
 }
 
 void MainWindow::onAddVault()
 {
     // Create selection dialog with tree view
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("Add Obsidian Vault"));
+    dialog.setWindowTitle(tr("Add Project Directory"));
     dialog.setMinimumSize(1200, 600);
     dialog.resize(1400, 700);
     dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
@@ -930,21 +1013,87 @@ void MainWindow::onAddVault()
     layout->setSpacing(12);
     
     // Header
-    QLabel* headerLabel = new QLabel(tr("Select an Obsidian Vault:"));
+    QLabel* headerLabel = new QLabel(tr("Select a project directory:"));
     headerLabel->setStyleSheet("font-size: 15px; font-weight: 600;");
     layout->addWidget(headerLabel);
     
     // Tree widget
     QTreeWidget* treeWidget = new QTreeWidget();
     treeWidget->setHeaderLabels(QStringList() << tr("Name") << tr("Status") << tr("Path"));
-    treeWidget->setRootIsDecorated(true);
+    treeWidget->setRootIsDecorated(false);
     treeWidget->setAlternatingRowColors(true);
     treeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
     treeWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
+    treeWidget->setExpandsOnDoubleClick(false);
+    treeWidget->setIconSize(QSize(14, 14));
+    treeWidget->setIndentation(18);
+    treeWidget->viewport()->setProperty("isProjectSelectionTreeViewport", true);
+    treeWidget->viewport()->installEventFilter(this);
     treeWidget->header()->setStretchLastSection(true);
     treeWidget->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     treeWidget->header()->setSectionResizeMode(2, QHeaderView::Stretch);
+
+    const int addableRole = Qt::UserRole + 2;
+    const int itemKindRole = Qt::UserRole + 3;
+    const int expandableRole = Qt::UserRole + 4;
+
+    const QColor disclosureColor = ThemeManager::instance()->currentTheme() == ThemeManager::Light
+        ? QColor("#3a3a3c")
+        : QColor("#d0d0d4");
+    const QColor selectedDisclosureColor = QColor("#ffffff");
+
+    auto createDisclosureIcon = [](const QColor& color, bool expanded) {
+        QPixmap pixmap(14, 14);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        QPen pen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        painter.setPen(pen);
+
+        QPainterPath path;
+        if (expanded) {
+            path.moveTo(3.5, 5.0);
+            path.lineTo(7.0, 9.0);
+            path.lineTo(10.5, 5.0);
+        } else {
+            path.moveTo(5.0, 3.5);
+            path.lineTo(9.0, 7.0);
+            path.lineTo(5.0, 10.5);
+        }
+        painter.drawPath(path);
+        painter.end();
+
+        return QIcon(pixmap);
+    };
+
+    std::function<void(QTreeWidgetItem*)> updateProjectTreeIcons;
+    auto refreshProjectTreeIcons = [&]() {
+        for (int i = 0; i < treeWidget->topLevelItemCount(); ++i) {
+            updateProjectTreeIcons(treeWidget->topLevelItem(i));
+        }
+    };
+
+    updateProjectTreeIcons = [&](QTreeWidgetItem* item) {
+        if (!item) {
+            return;
+        }
+
+        const bool expandable = item->data(0, expandableRole).toBool();
+        if (expandable) {
+            const bool selected = treeWidget->currentItem() == item;
+            item->setIcon(0, createDisclosureIcon(selected ? selectedDisclosureColor : disclosureColor,
+                                                   item->isExpanded()));
+        } else {
+            item->setIcon(0, QIcon());
+        }
+
+        for (int i = 0; i < item->childCount(); ++i) {
+            updateProjectTreeIcons(item->child(i));
+        }
+    };
     
     // Get known vaults from Obsidian config for status display
     QSet<QString> openVaults;
@@ -983,51 +1132,43 @@ void MainWindow::onAddVault()
             
             item->setData(0, Qt::UserRole, fullPath);
             
-            // Check if it's a valid Obsidian vault
+            // Any directory can be added for monitoring; Obsidian only affects preview/open behavior.
             QDir subDir(fullPath);
-            bool isVault = subDir.exists(".obsidian");
+            bool hasObsidian = subDir.exists(".obsidian");
+            bool alreadyAdded = m_vaultModel->contains(fullPath);
             
-            if (isVault) {
-                // Valid vault - can be selected
-                QString vaultName = m_vaultValidator->getVaultName(fullPath);
-                
-                // Check if already added
-                bool alreadyAdded = m_vaultModel->contains(fullPath);
-                
-                // Column 0: Name with icon
-                item->setText(0, "📁 " + subdir);
-                
-                // Column 1: Status with color
-                if (alreadyAdded) {
-                    item->setText(1, "[Added]");
-                    item->setForeground(1, QColor("#86868b"));
-                } else if (openVaults.contains(fullPath)) {
-                    item->setText(1, "● Open");
-                    item->setForeground(1, QColor("#34c759"));
-                } else {
-                    item->setText(1, "Vault");
-                    item->setForeground(1, QColor("#007aff"));
-                }
-                
-                // Column 2: Full path
-                item->setText(2, fullPath);
-                
-                item->setData(0, Qt::UserRole + 1, vaultName);
-                item->setData(0, Qt::UserRole + 2, !alreadyAdded);  // Can select if not added
-                
+            QString defaultName = m_vaultValidator->getVaultName(fullPath);
+
+            item->setText(0, hasObsidian ? ("📁 " + subdir) : ("📂 " + subdir));
+            item->setText(2, fullPath);
+            item->setData(0, Qt::UserRole + 1, defaultName);
+            item->setData(0, addableRole, !alreadyAdded);
+            item->setData(0, itemKindRole, QStringLiteral("filesystem"));
+            item->setData(0, expandableRole, true);
+
+            if (alreadyAdded) {
+                item->setText(1, "[Added]");
+                item->setForeground(1, QColor("#86868b"));
+            } else if (hasObsidian && openVaults.contains(fullPath)) {
+                item->setText(1, "● Open");
+                item->setForeground(1, QColor("#34c759"));
+            } else if (hasObsidian) {
+                item->setText(1, "Vault");
+                item->setForeground(1, QColor("#007aff"));
             } else {
-                // Not a vault - gray out but can expand
-                item->setText(0, "📂 " + subdir);
-                item->setText(1, "");
-                item->setText(2, fullPath);
+                item->setText(1, "Directory");
+                item->setForeground(1, QColor("#86868b"));
+            }
+
+            // Add placeholder child to show expand arrow for further navigation
+            QTreeWidgetItem* placeholder = new QTreeWidgetItem(item);
+            placeholder->setText(0, tr("Loading..."));
+            placeholder->setData(0, Qt::UserRole, "");
+            placeholder->setData(0, addableRole, false);
+            placeholder->setData(0, itemKindRole, QStringLiteral("placeholder"));
+            placeholder->setData(0, expandableRole, false);
+            if (!hasObsidian) {
                 item->setForeground(0, QColor("#86868b"));
-                item->setForeground(2, QColor("#86868b"));
-                item->setData(0, Qt::UserRole + 2, false);  // Not a vault
-                
-                // Add placeholder child to show expand arrow
-                QTreeWidgetItem* placeholder = new QTreeWidgetItem(item);
-                placeholder->setText(0, tr("Loading..."));
-                placeholder->setData(0, Qt::UserRole, "");
             }
             
             item->setToolTip(0, fullPath);
@@ -1041,7 +1182,9 @@ void MainWindow::onAddVault()
     homeItem->setText(1, "");
     homeItem->setText(2, homePath);
     homeItem->setData(0, Qt::UserRole, homePath);
-    homeItem->setData(0, Qt::UserRole + 2, false);  // Not a vault
+    homeItem->setData(0, addableRole, false);
+    homeItem->setData(0, itemKindRole, QStringLiteral("filesystem_root"));
+    homeItem->setData(0, expandableRole, true);
     homeItem->setForeground(0, QColor("#86868b"));
     homeItem->setForeground(2, QColor("#86868b"));
     
@@ -1049,6 +1192,9 @@ void MainWindow::onAddVault()
     QTreeWidgetItem* homePlaceholder = new QTreeWidgetItem(homeItem);
     homePlaceholder->setText(0, tr("Loading..."));
     homePlaceholder->setData(0, Qt::UserRole, "");
+    homePlaceholder->setData(0, addableRole, false);
+    homePlaceholder->setData(0, itemKindRole, QStringLiteral("placeholder"));
+    homePlaceholder->setData(0, expandableRole, false);
     
     // Also add known vaults from Obsidian config as quick access
     QTreeWidgetItem* knownItem = new QTreeWidgetItem(treeWidget);
@@ -1056,7 +1202,9 @@ void MainWindow::onAddVault()
     knownItem->setText(1, "");
     knownItem->setText(2, "");
     knownItem->setData(0, Qt::UserRole, "");
-    knownItem->setData(0, Qt::UserRole + 2, false);
+    knownItem->setData(0, addableRole, false);
+    knownItem->setData(0, itemKindRole, QStringLiteral("known_group"));
+    knownItem->setData(0, expandableRole, true);
     knownItem->setForeground(0, QColor("#007aff"));
     QFont knownFont = knownItem->font(0);
     knownFont.setBold(true);
@@ -1086,7 +1234,9 @@ void MainWindow::onAddVault()
         
         vaultItem->setData(0, Qt::UserRole, info.path);
         vaultItem->setData(0, Qt::UserRole + 1, info.name);
-        vaultItem->setData(0, Qt::UserRole + 2, true);  // Is vault
+        vaultItem->setData(0, addableRole, true);
+        vaultItem->setData(0, itemKindRole, QStringLiteral("known_vault"));
+        vaultItem->setData(0, expandableRole, false);
         
         vaultItem->setToolTip(0, info.path);
     }
@@ -1099,7 +1249,7 @@ void MainWindow::onAddVault()
     layout->addWidget(treeWidget);
     
     // Info label
-    QLabel* infoLabel = new QLabel(tr("📁 = Vault (can be added)  |  📂 = Directory (expand to navigate)  |  ● Open = Currently open in Obsidian"));
+    QLabel* infoLabel = new QLabel(tr("📁 = Obsidian vault  |  📂 = Directory for monitoring  |  ● Open = Currently open in Obsidian"));
     infoLabel->setStyleSheet("color: #86868b; font-size: 12px;");
     layout->addWidget(infoLabel);
     
@@ -1110,6 +1260,7 @@ void MainWindow::onAddVault()
     QPushButton* addBtn = new QPushButton(tr("Add"));
     addBtn->setDefault(true);
     addBtn->setFixedWidth(80);
+    addBtn->setEnabled(false);
     QPushButton* cancelBtn = new QPushButton(tr("Cancel"));
     cancelBtn->setFixedWidth(80);
     
@@ -1129,29 +1280,44 @@ void MainWindow::onAddVault()
                 if (!path.isEmpty()) {
                     populateDirectory(path, item);
                 }
+                item->setData(0, expandableRole, item->childCount() > 0);
             }
         }
+        refreshProjectTreeIcons();
+    });
+    connect(treeWidget, &QTreeWidget::itemCollapsed, [&](QTreeWidgetItem*) {
+        refreshProjectTreeIcons();
+    });
+    connect(treeWidget, &QTreeWidget::itemSelectionChanged, [&]() {
+        QTreeWidgetItem* selected = treeWidget->currentItem();
+        addBtn->setEnabled(selected && selected->data(0, addableRole).toBool());
+        refreshProjectTreeIcons();
     });
     
     // Connect buttons
     connect(cancelBtn, &QPushButton::clicked, &dialog, &QDialog::reject);
     connect(addBtn, &QPushButton::clicked, [&]() {
         QTreeWidgetItem* selected = treeWidget->currentItem();
-        if (selected && selected->data(0, Qt::UserRole + 2).toBool()) {
+        if (selected && selected->data(0, addableRole).toBool()) {
             dialog.accept();
         } else {
-            QMessageBox::information(&dialog, tr("Select Vault"), 
-                tr("Please select a valid Obsidian vault (📁 items)."));
+            QMessageBox::information(&dialog, tr("Select Directory"),
+                tr("Please select a project directory that is not already added."));
         }
     });
     connect(treeWidget, &QTreeWidget::itemDoubleClicked, [&](QTreeWidgetItem* item, int) {
-        if (item && item->data(0, Qt::UserRole + 2).toBool()) {
+        if (!item) {
+            return;
+        }
+
+        if (item->data(0, addableRole).toBool()) {
             dialog.accept();
         }
     });
     
     // Expand home directory by default
     treeWidget->expandItem(homeItem);
+    refreshProjectTreeIcons();
     
     // Apply theme style to dialog
     dialog.setStyleSheet(ThemeManager::instance()->currentStyle());
@@ -1166,7 +1332,7 @@ void MainWindow::onAddVault()
                 defaultName = m_vaultValidator->getVaultName(path);
             }
             
-            QString name = QInputDialog::getText(this, tr("Vault Name"), tr("Enter vault name:"),
+            QString name = QInputDialog::getText(this, tr("Project Name"), tr("Enter project name:"),
                                                   QLineEdit::Normal, defaultName);
             if (name.isEmpty()) return;
             
@@ -1216,6 +1382,11 @@ void MainWindow::onOpenInObsidian()
     }
 
     QString path = item->data(Qt::UserRole).toString();
+    if (resolveObsidianOpenPath(path).isEmpty()) {
+        QMessageBox::information(this, tr("Unavailable"),
+                                 tr("This project directory has no Obsidian configuration."));
+        return;
+    }
     openVaultInObsidian(path);
 }
 
@@ -1224,6 +1395,9 @@ void MainWindow::onVaultDoubleClicked(QListWidgetItem *item)
     if (!item) return;
     
     QString path = item->data(Qt::UserRole).toString();
+    if (resolveObsidianOpenPath(path).isEmpty()) {
+        return;
+    }
     openVaultInObsidian(path);
 }
 
@@ -1240,8 +1414,11 @@ void MainWindow::onVaultContextMenu(const QPoint &pos)
     QAction *renameAction = contextMenu.addAction(tr("Rename"));
     renameAction->setShortcut(QKeySequence("F2"));
     
-    QAction *openAction = contextMenu.addAction(tr("Open in Obsidian"));
-    openAction->setShortcut(QKeySequence("Ctrl+O"));
+    QAction *openAction = nullptr;
+    if (!resolveObsidianOpenPath(item->data(Qt::UserRole).toString()).isEmpty()) {
+        openAction = contextMenu.addAction(tr("Open in Obsidian"));
+        openAction->setShortcut(QKeySequence("Ctrl+O"));
+    }
     
     contextMenu.addSeparator();
     
@@ -1252,7 +1429,7 @@ void MainWindow::onVaultContextMenu(const QPoint &pos)
     if (selectedAction == renameAction) {
         m_editingVaultPath = item->data(Qt::UserRole).toString();
         m_vaultList->editItem(item);
-    } else if (selectedAction == openAction) {
+    } else if (openAction && selectedAction == openAction) {
         QString path = item->data(Qt::UserRole).toString();
         openVaultInObsidian(path);
     } else if (selectedAction == removeAction) {
@@ -1298,7 +1475,7 @@ void MainWindow::onVaultItemChanged(QListWidgetItem *item)
     m_editingVaultPath.clear();
 }
 
-void MainWindow::openVaultInObsidian(const QString& vaultPath)
+QString MainWindow::resolveObsidianOpenPath(const QString& vaultPath) const
 {
     // Open priority:
     // 1) If .r2mo/.obsidian exists -> open .r2mo
@@ -1324,7 +1501,13 @@ void MainWindow::openVaultInObsidian(const QString& vaultPath)
             openPath = vaultPath;
         }
     }
-    
+
+    return openPath;
+}
+
+void MainWindow::openVaultInObsidian(const QString& vaultPath)
+{
+    const QString openPath = resolveObsidianOpenPath(vaultPath);
     if (openPath.isEmpty()) {
         QMessageBox::warning(this, tr("Warning"), 
             tr("Not a valid Obsidian vault.\n\nPath: %1\n\nRequired: .r2mo/.obsidian or .obsidian directory").arg(vaultPath));
@@ -1367,23 +1550,37 @@ void MainWindow::onSettings()
 void MainWindow::updatePreviewPane(const QString& name, const QString& path)
 {
     m_currentPreviewPath = path;
+    const bool hasObsidian = !resolveObsidianOpenPath(path).isEmpty();
     
     // Update title and show buttons
     m_previewTitle->setText(name);
     m_previewTitle->show();
     m_previewEditBtn->show();
-    m_previewOpenBtn->show();
+    m_previewOpenBtn->setVisible(hasObsidian);
     m_previewTitleEdit->hide();
     
     // Clear previous content
     m_graphScene->clear();
     m_taskTree->clear();
     if (path.trimmed().isEmpty()) {
+        m_overviewEmptyLabel->setText(tr("Select a vault to view details..."));
         setOverviewEmptyState(true);
+        buildAIToolsTab(QString());
+        return;
+    }
+
+    if (!hasObsidian) {
+        m_overviewEmptyLabel->setText(tr("No Obsidian configuration found for this project."));
+        setOverviewEmptyState(true);
+        m_r2moStatsCard->setVisible(false);
+        m_graphScene->clear();
+        m_taskTree->clear();
+        buildAIToolsTab(QString());
         return;
     }
 
     setOverviewEmptyState(false);
+    m_overviewEmptyLabel->setText(tr("Select a vault to view details..."));
     m_overviewPathLabel->setText(path);
     clearOverviewGrid(m_vaultStatsGrid);
     clearOverviewGrid(m_r2moStatsGrid);
@@ -2659,6 +2856,28 @@ void MainWindow::onAbout()
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    if (watched->property("isProjectSelectionTreeViewport").toBool() &&
+        (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick)) {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+        if (mouseEvent->button() == Qt::LeftButton) {
+            if (QTreeWidget *tree = qobject_cast<QTreeWidget*>(watched->parent())) {
+                QTreeWidgetItem *item = tree->itemAt(mouseEvent->pos());
+                if (item) {
+                    const bool expandable = item->data(0, Qt::UserRole + 4).toBool();
+                    if (expandable) {
+                        const QRect itemRect = tree->visualRect(tree->indexFromItem(item, 0));
+                        const int iconHotspotRight = itemRect.left() + tree->iconSize().width() + 10;
+                        if (mouseEvent->pos().x() <= iconHotspotRight) {
+                            item->setExpanded(!item->isExpanded());
+                            tree->setCurrentItem(item);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if (QTreeWidget *tree = qobject_cast<QTreeWidget*>(watched)) {
         if (tree->property("isMonitorTree").toBool() &&
             (event->type() == QEvent::Resize || event->type() == QEvent::Show || event->type() == QEvent::LayoutRequest)) {
@@ -2899,18 +3118,34 @@ void MainWindow::addMonitorCloseButton(int tabIndex)
 QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths()
 {
     QList<QPair<QString, QString>> result;
+    QSet<QString> seenPaths;
     QList<Vault> vaults = m_vaultModel->vaults();
     
     for (const Vault& vault : vaults) {
         QDir vaultDir(vault.path);
-        if (!vaultDir.exists() || !m_vaultValidator->hasR2moConfig(vault.path)) {
+        if (!vaultDir.exists()) {
             continue;
         }
+
+        const QString normalizedVaultPath = QDir::cleanPath(vault.path);
+        if (!seenPaths.contains(normalizedVaultPath)) {
+            result.append(qMakePair(vault.name, normalizedVaultPath));
+            seenPaths.insert(normalizedVaultPath);
+        }
+
+        if (!m_vaultValidator->hasR2moConfig(vault.path)) {
+            continue;
+        }
+
         R2moScanner scanner;
         QList<R2moSubProject> projects = scanner.scanVault(vault.path);
-        
         for (const R2moSubProject& proj : projects) {
-            result.append(qMakePair(proj.name, proj.path));
+            const QString normalizedProjectPath = QDir::cleanPath(proj.path);
+            if (seenPaths.contains(normalizedProjectPath)) {
+                continue;
+            }
+            result.append(qMakePair(proj.name, normalizedProjectPath));
+            seenPaths.insert(normalizedProjectPath);
         }
     }
     
@@ -2997,6 +3232,38 @@ void MainWindow::onMonitorRefresh()
     m_monitorScanWatcher->setFuture(future);
 }
 
+void MainWindow::openMonitorTarget(QTreeWidgetItem *row)
+{
+    if (!row) {
+        return;
+    }
+
+    const qint64 terminalPid = row->data(0, Qt::UserRole + 2).toLongLong();
+    if (terminalPid > 0 && activateTerminalWindow(terminalPid)) {
+        return;
+    }
+
+    const QString projectPath = row->data(0, Qt::UserRole).toString();
+    if (projectPath.isEmpty()) {
+        return;
+    }
+
+    QString preferredOpenPath = projectPath;
+    const QList<Vault> vaults = m_vaultModel->vaults();
+    for (const Vault& vault : vaults) {
+        const QString vaultPath = QDir::cleanPath(vault.path);
+        const QString normalizedProjectPath = QDir::cleanPath(projectPath);
+        if (normalizedProjectPath == vaultPath || normalizedProjectPath.startsWith(vaultPath + "/")) {
+            preferredOpenPath = vault.path;
+            break;
+        }
+    }
+
+    if (!resolveObsidianOpenPath(preferredOpenPath).isEmpty()) {
+        openVaultInObsidian(preferredOpenPath);
+    }
+}
+
 void MainWindow::refreshMonitorAsync()
 {
     if (m_monitorRefreshing) return;
@@ -3053,8 +3320,9 @@ QString MainWindow::monitorRowKey(const QString& projectPath, const SessionInfo&
     const QString stableSessionKey = session.sessionId.isEmpty() || session.sessionId == "unknown"
         ? QString("pid-%1").arg(session.processPid)
         : session.sessionId;
-    return QString("%1|%2|%3")
-        .arg(projectPath, session.toolName, stableSessionKey);
+    const qint64 stableShellKey = session.shellPid > 0 ? session.shellPid : session.processPid;
+    return QString("%1|%2|%3|%4")
+        .arg(projectPath, session.toolName, stableSessionKey, QString::number(stableShellKey));
 }
 
 void MainWindow::updateMonitorStatusLabel(QLabel *label, SessionStatus status) const
@@ -3195,6 +3463,10 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
         "QTreeWidget::item:selected { background: #e8f4fd; color: #1d1d1f; }"
         "QHeaderView::section { background: #f5f5f7; color: #86868b; font-size: 12px; font-weight: 600; padding: 6px 4px; border: none; border-bottom: 1px solid #e0e0e0; }"
     );
+    connect(tree, &QTreeWidget::itemDoubleClicked, this,
+            [this](QTreeWidgetItem *item, int) {
+                openMonitorTarget(item);
+            });
 
     if (monitorData.isEmpty()) {
         QTreeWidgetItem *emptyItem = new QTreeWidgetItem(tree);
@@ -3274,8 +3546,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
                 row->setData(0, Qt::UserRole + 10, monitorRowKey(pmd.projectPath, si));
 
                 connect(gotoBtn, &QPushButton::clicked, this, [this, row]() {
-                    qint64 termPid = row->data(0, Qt::UserRole + 2).toLongLong();
-                    activateTerminalWindow(termPid);
+                    openMonitorTarget(row);
                 });
             }
         }
@@ -3349,25 +3620,82 @@ void MainWindow::updateMonitorTableColumns(QTreeWidget *tree)
     tree->setColumnWidth(5, actionWidth);
 }
 
-void MainWindow::activateTerminalWindow(qint64 pid)
+bool MainWindow::activateTerminalWindow(qint64 pid)
 {
 #ifdef Q_OS_MAC
-    // Use osascript to activate the terminal window by PID
+    if (pid <= 0) {
+        return false;
+    }
+
+    QString commandPath;
+    {
+        QProcess ps;
+        ps.start("ps", QStringList() << "-p" << QString::number(pid) << "-o" << "comm=");
+        if (ps.waitForFinished(2000) && ps.exitStatus() == QProcess::NormalExit && ps.exitCode() == 0) {
+            commandPath = QString::fromUtf8(ps.readAllStandardOutput()).trimmed();
+        }
+    }
+
+    QString appName;
+    const QString normalizedCommand = commandPath.trimmed();
+    if (normalizedCommand.contains(".app/Contents/MacOS/")) {
+        QRegularExpression appRegex(R"(([^/]+)\.app/Contents/MacOS/[^/]+$)");
+        const QRegularExpressionMatch match = appRegex.match(normalizedCommand);
+        if (match.hasMatch()) {
+            appName = match.captured(1);
+        }
+    }
+
+    if (appName.isEmpty() && !normalizedCommand.isEmpty()) {
+        const QString baseName = QFileInfo(normalizedCommand).fileName();
+        const QString lower = baseName.toLower();
+        if (lower == "ghostty") {
+            appName = "Ghostty";
+        } else if (lower == "wezterm-gui" || lower == "wezterm") {
+            appName = "WezTerm";
+        } else if (lower == "iterm2" || lower == "iterm") {
+            appName = "iTerm";
+        } else if (lower == "terminal") {
+            appName = "Terminal";
+        }
+    }
+
     QString script = QString(
+        "set targetPid to %1\n"
+        "set targetApp to %2\n"
+        "if targetApp is not \"\" then\n"
+        "    tell application targetApp to activate\n"
+        "end if\n"
         "tell application \"System Events\"\n"
-        "    set procList to every process whose unix id is %1\n"
+        "    set procList to every process whose unix id is targetPid\n"
         "    if (count of procList) > 0 then\n"
-        "        set frontmost of item 1 of procList to true\n"
+        "        tell item 1 of procList\n"
+        "            set frontmost to true\n"
+        "            try\n"
+        "                if (count of windows) > 0 then\n"
+        "                    perform action \"AXRaise\" of window 1\n"
+        "                end if\n"
+        "            end try\n"
+        "        end tell\n"
+        "        return \"ok\"\n"
         "    end if\n"
         "end tell"
-    ).arg(pid);
+    ).arg(pid).arg(appName.isEmpty() ? QString("\"\"") : QString("\"%1\"").arg(appName));
 
-    QProcess *osascript = new QProcess(this);
-    osascript->start("osascript", QStringList() << "-e" << script);
-    connect(osascript, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            osascript, &QProcess::deleteLater);
+    QProcess osascript;
+    osascript.start("osascript", QStringList() << "-e" << script);
+    if (!osascript.waitForFinished(3000)) {
+        osascript.kill();
+        return false;
+    }
+
+    const QString output = QString::fromUtf8(osascript.readAllStandardOutput()).trimmed();
+    return osascript.exitStatus() == QProcess::NormalExit &&
+           osascript.exitCode() == 0 &&
+           output == "ok";
 #else
     Q_UNUSED(pid);
+    return false;
 #endif
 }
 

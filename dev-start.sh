@@ -1,70 +1,93 @@
 #!/bin/bash
-# dev-start.sh - Start development environment (restart mode)
+# dev-start.sh - Rebuild and restart Obsidian Manager for local development
 # Usage: ./dev-start.sh
-# Kills existing app, rebuilds, and starts fresh
-# Auto-backgrounds itself so terminal remains usable
+
+set -euo pipefail
 
 QT_PATH="/Users/lang/Qt/6.10.0/macos"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$PROJECT_DIR/build"
 PID_FILE="$PROJECT_DIR/.dev-app.pid"
-APP_PATH="$BUILD_DIR/ObsidianManager.app/Contents/MacOS/ObsidianManager"
 LOG_FILE="$PROJECT_DIR/.dev-build.log"
+APP_BUNDLE="$BUILD_DIR/ObsidianManager.app"
+APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/ObsidianManager"
+APP_BUNDLE_ID="com.r2mo.obsidianmanager"
 
-# Auto-background if running in foreground
-if [ -z "$DEV_START_BG" ]; then
-    echo "Starting dev build in background..."
-    export DEV_START_BG=1
-    nohup "$0" > "$LOG_FILE" 2>&1 &
-    echo "Build started. Log: $LOG_FILE"
-    echo "Terminal is free. Run './dev-start.sh' again to restart."
-    exit 0
-fi
+timestamp() {
+    date '+%Y-%m-%d %H:%M:%S'
+}
 
-# --- Below runs in background ---
+log() {
+    printf '[%s] %s\n' "$(timestamp)" "$*" | tee -a "$LOG_FILE"
+}
 
-# --- Below runs in background ---
-set -e
+activate_app() {
+    osascript <<EOF >/dev/null 2>&1 || true
+tell application id "$APP_BUNDLE_ID" to activate
+EOF
+}
 
-echo "=== Obsidian Manager Dev Start ===" >> "$LOG_FILE"
-echo "Qt Path: $QT_PATH" >> "$LOG_FILE"
-echo "Project: $PROJECT_DIR" >> "$LOG_FILE"
+collect_app_pids() {
+    pgrep -f "$APP_EXECUTABLE" || true
+}
 
-# Check Qt installation
+wait_for_live_app() {
+    local timeout_seconds="$1"
+    local waited=0
+    while [ "$waited" -lt "$timeout_seconds" ]; do
+        if [ -n "$(collect_app_pids)" ]; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    return 1
+}
+
+: > "$LOG_FILE"
+
+log "=== Obsidian Manager Dev Start ==="
+log "Project: $PROJECT_DIR"
+log "Qt Path: $QT_PATH"
+
 if [ ! -d "$QT_PATH" ]; then
-    echo "ERROR: Qt 6.10.0 not found at $QT_PATH" >> "$LOG_FILE"
+    log "ERROR: Qt 6.10.0 not found at $QT_PATH"
     exit 1
 fi
 
-# Kill existing app if running
-if [ -f "$PID_FILE" ]; then
-    OLD_PID=$(cat "$PID_FILE")
-    if kill -0 "$OLD_PID" 2>/dev/null; then
-        echo "Stopping previous app (PID: $OLD_PID)..." >> "$LOG_FILE"
-        kill "$OLD_PID" 2>/dev/null || true
-        sleep 0.5
-    fi
+log "Stopping previous instances..."
+"$PROJECT_DIR/dev-stop.sh" | tee -a "$LOG_FILE"
+
+log "Configuring CMake..."
+cmake -S "$PROJECT_DIR" -B "$BUILD_DIR" \
+    -DCMAKE_PREFIX_PATH="$QT_PATH" \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee -a "$LOG_FILE"
+
+log "Building..."
+cmake --build "$BUILD_DIR" --parallel 2>&1 | tee -a "$LOG_FILE"
+
+if [ ! -f "$APP_EXECUTABLE" ]; then
+    log "ERROR: Application not found at $APP_EXECUTABLE"
+    exit 1
+fi
+
+log "Starting application..."
+open -n "$APP_BUNDLE" 2>&1 | tee -a "$LOG_FILE"
+
+if ! wait_for_live_app 5; then
+    log "ERROR: Application process did not stay alive after launch."
     rm -f "$PID_FILE"
-fi
-
-# Configure if build dir doesn't exist
-if [ ! -d "$BUILD_DIR" ]; then
-    echo "Configuring CMake..." >> "$LOG_FILE"
-    cmake -B "$BUILD_DIR" -DCMAKE_PREFIX_PATH="$QT_PATH" >> "$LOG_FILE" 2>&1
-fi
-
-# Build
-echo "Building..." >> "$LOG_FILE"
-cmake --build "$BUILD_DIR" --parallel >> "$LOG_FILE" 2>&1
-
-# Run in background, detach from terminal
-echo "Starting application..." >> "$LOG_FILE"
-if [ -f "$APP_PATH" ]; then
-    "$APP_PATH" &
-    APP_PID=$!
-    echo "$APP_PID" > "$PID_FILE"
-    echo "App started (PID: $APP_PID)" >> "$LOG_FILE"
-else
-    echo "ERROR: Application not found at $APP_PATH" >> "$LOG_FILE"
     exit 1
 fi
+
+APP_PID="$(collect_app_pids | tail -n 1)"
+echo "$APP_PID" > "$PID_FILE"
+
+sleep 1
+activate_app
+
+log "Application started successfully."
+log "PID: $APP_PID"
+log "Bundle: $APP_BUNDLE"
+
+printf '\nRestart complete. PID: %s\nLog: %s\n' "$APP_PID" "$LOG_FILE"

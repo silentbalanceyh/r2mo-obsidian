@@ -23,6 +23,7 @@ struct SessionInfo {
     QString terminalName;
     QString terminalIconPath;
     qint64 terminalPid;
+    qint64 shellPid;
     qint64 processPid;
     SessionStatus status;
     QDateTime lastActivity;
@@ -49,6 +50,13 @@ public:
     static QString terminalIconPath(const QString& terminalName);
 
 private:
+    struct GenericSessionArtifact {
+        QString sessionId;
+        QString sessionPath;
+        QString projectPath;
+        QDateTime lastModified;
+    };
+
     struct CodexSessionArtifact {
         QString sessionId;
         QString sessionPath;
@@ -80,12 +88,16 @@ private:
     QString extractSessionIdFromCommand(const QString& cmd, const QString& toolName) const;
     QList<CodexSessionArtifact> collectCodexSessionArtifacts() const;
     void assignCodexSessionArtifacts(QList<SessionInfo>& sessions) const;
+    void assignClaudeSessionArtifacts(QList<SessionInfo>& sessions) const;
+    void assignOpenCodeSessionMetadata(QList<SessionInfo>& sessions) const;
     void resolveSessionArtifact(const QString& projectPath, const QString& toolName,
                                 const QString& cmd, QString& sessionId, QString& sessionPath) const;
+    QList<GenericSessionArtifact> collectClaudeSessionArtifacts(const QString& projectPath) const;
     void findLatestClaudeSessionArtifact(const QString& projectPath, QString& sessionId,
                                          QString& sessionPath) const;
     void findLatestOpenCodeSessionArtifact(const QString& projectPath, QString& sessionId,
                                            QString& sessionPath) const;
+    QStringList collectOpenCodeSessionIdsForProject(const QString& projectPath) const;
 
     QMap<QString, QList<SessionInfo>> groupByProject(const QList<SessionInfo>& sessions,
                                                       const QList<QPair<QString, QString>>& projects);

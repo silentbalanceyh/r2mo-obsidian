@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include <QDirIterator>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStandardPaths>
 #include <algorithm>
 
@@ -28,11 +29,51 @@ SessionScanner::SessionScanner()
 }
 
 namespace {
+QString normalizePath(const QString& path)
+{
+    return path.isEmpty() ? QString() : QDir::cleanPath(path);
+}
+
+bool pathBelongsToProject(const QString& candidatePath, const QString& projectPath)
+{
+    const QString normalizedCandidate = normalizePath(candidatePath);
+    const QString normalizedProject = normalizePath(projectPath);
+    if (normalizedCandidate.isEmpty() || normalizedProject.isEmpty()) {
+        return false;
+    }
+    return normalizedCandidate == normalizedProject ||
+           normalizedCandidate.startsWith(normalizedProject + "/");
+}
+
+bool hasKnownSessionId(const QString& sessionId)
+{
+    return !sessionId.isEmpty() && sessionId != "unknown";
+}
+
+bool isBetterSessionCandidate(const SessionInfo& candidate, const SessionInfo& current)
+{
+    if (hasKnownSessionId(candidate.sessionId) != hasKnownSessionId(current.sessionId)) {
+        return hasKnownSessionId(candidate.sessionId);
+    }
+    if (candidate.sessionPath.isEmpty() != current.sessionPath.isEmpty()) {
+        return !candidate.sessionPath.isEmpty();
+    }
+    if (candidate.status != current.status) {
+        return candidate.status == SessionStatus::Working;
+    }
+    const bool candidateRunning = candidate.status == SessionStatus::Working;
+    const bool currentRunning = current.status == SessionStatus::Working;
+    if (candidateRunning != currentRunning) {
+        return candidateRunning;
+    }
+    return candidate.processPid < current.processPid;
+}
+
 QStringList extractUniqueOpenCodeSessionIds(const QString& rawContent)
 {
     QStringList sessionIds;
     QSet<QString> seen;
-    QRegularExpression re(R"(session:(ses_[^":]+):)");
+    QRegularExpression re(R"((ses_[A-Za-z0-9]+))");
     QRegularExpressionMatchIterator it = re.globalMatch(rawContent);
     while (it.hasNext()) {
         const QRegularExpressionMatch match = it.next();
@@ -94,6 +135,83 @@ bool workspaceTerminalMentionsProject(const QString& rawContent, const QString& 
     return false;
 }
 
+struct OpenCodeDatabaseSession {
+    QString projectPath;
+    QString directory;
+    QString sessionId;
+};
+
+QList<OpenCodeDatabaseSession> collectOpenCodeSessionsFromDatabase(const QString& projectPath)
+{
+    QList<OpenCodeDatabaseSession> sessions;
+    const QString normalizedProjectPath = normalizePath(projectPath);
+    if (normalizedProjectPath.isEmpty()) {
+        return sessions;
+    }
+
+    const QString databasePath = QDir::homePath() + "/.local/share/opencode/opencode.db";
+    if (!QFileInfo::exists(databasePath)) {
+        return sessions;
+    }
+
+    const QString query = QStringLiteral(
+        "select p.worktree, s.directory, s.id "
+        "from session s "
+        "join project p on p.id = s.project_id "
+        "where s.time_archived is null "
+        "order by s.time_updated desc;");
+
+    QProcess sqlite;
+    sqlite.start("sqlite3", QStringList() << "-noheader" << "-separator" << "|" << databasePath << query);
+    if (!sqlite.waitForFinished(3000) ||
+        sqlite.exitStatus() != QProcess::NormalExit ||
+        sqlite.exitCode() != 0) {
+        sqlite.kill();
+        return sessions;
+    }
+
+    QSet<QString> seen;
+    const QStringList lines = QString::fromUtf8(sqlite.readAllStandardOutput()).split('\n', Qt::SkipEmptyParts);
+    for (const QString& line : lines) {
+        const QStringList parts = line.split('|');
+        if (parts.size() < 3) {
+            continue;
+        }
+
+        const QString worktree = normalizePath(parts.at(0).trimmed());
+        const QString directory = normalizePath(parts.at(1).trimmed());
+        const QString sessionId = parts.at(2).trimmed();
+        if (sessionId.isEmpty() || seen.contains(sessionId)) {
+            continue;
+        }
+
+        const bool matchesWorktree =
+            pathBelongsToProject(worktree, normalizedProjectPath) ||
+            pathBelongsToProject(normalizedProjectPath, worktree);
+        const bool matchesDirectory =
+            pathBelongsToProject(directory, normalizedProjectPath) ||
+            pathBelongsToProject(normalizedProjectPath, directory);
+        if (!matchesWorktree && !matchesDirectory) {
+            continue;
+        }
+
+        seen.insert(sessionId);
+        sessions.append(OpenCodeDatabaseSession{worktree, directory, sessionId});
+    }
+
+    return sessions;
+}
+
+QStringList collectOpenCodeSessionIdsFromDatabase(const QString& projectPath)
+{
+    QStringList sessionIds;
+    const QList<OpenCodeDatabaseSession> sessions = collectOpenCodeSessionsFromDatabase(projectPath);
+    for (const OpenCodeDatabaseSession& session : sessions) {
+        sessionIds.append(session.sessionId);
+    }
+    return sessionIds;
+}
+
 QString sessionIdFromRolloutBaseName(const QString& base)
 {
     const QStringList parts = base.split('-');
@@ -134,6 +252,7 @@ QString SessionScanner::terminalIconPath(const QString& terminalName)
     QString lower = terminalName.toLower();
     if (lower.contains("wezterm")) return ":/icons/ui/terminal-wezterm.svg";
     if (lower.contains("iterm")) return ":/icons/ui/terminal-iterm.svg";
+    if (lower.contains("ghostty")) return ":/icons/ui/terminal-macos.svg";
     if (lower.contains("terminal")) return ":/icons/ui/terminal-macos.svg";
     return QString();
 }
@@ -583,6 +702,16 @@ QString SessionScanner::extractSessionIdFromCommand(const QString& cmd, const QS
 void SessionScanner::findLatestClaudeSessionArtifact(const QString& projectPath, QString& sessionId,
                                                      QString& sessionPath) const
 {
+    const QList<GenericSessionArtifact> artifacts = collectClaudeSessionArtifacts(projectPath);
+    if (!artifacts.isEmpty()) {
+        sessionId = artifacts.first().sessionId;
+        sessionPath = artifacts.first().sessionPath;
+    }
+}
+
+QList<SessionScanner::GenericSessionArtifact> SessionScanner::collectClaudeSessionArtifacts(const QString& projectPath) const
+{
+    QList<GenericSessionArtifact> artifacts;
     const QString homeDir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
     QString escaped = projectPath;
     escaped.replace("/", "-");
@@ -593,18 +722,26 @@ void SessionScanner::findLatestClaudeSessionArtifact(const QString& projectPath,
     }
 
     if (!dir.exists()) {
-        return;
+        return artifacts;
     }
 
     const QFileInfoList files = dir.entryInfoList(QStringList() << "*.jsonl" << "*.json", QDir::Files, QDir::Time);
     for (const QFileInfo& fi : files) {
         const QString base = fi.completeBaseName();
         if (base.length() >= 32 || base.count("-") >= 4) {
-            sessionId = base;
-            sessionPath = fi.filePath();
-            return;
+            GenericSessionArtifact artifact;
+            artifact.sessionId = base;
+            artifact.sessionPath = fi.filePath();
+            artifact.projectPath = normalizePath(projectPath);
+            artifact.lastModified = fi.lastModified();
+            artifacts.append(artifact);
         }
     }
+
+    std::sort(artifacts.begin(), artifacts.end(), [](const GenericSessionArtifact& lhs, const GenericSessionArtifact& rhs) {
+        return lhs.lastModified > rhs.lastModified;
+    });
+    return artifacts;
 }
 
 QList<SessionScanner::CodexSessionArtifact> SessionScanner::collectCodexSessionArtifacts() const
@@ -648,6 +785,7 @@ QList<SessionScanner::CodexSessionArtifact> SessionScanner::collectCodexSessionA
 void SessionScanner::findLatestOpenCodeSessionArtifact(const QString& projectPath, QString& sessionId,
                                                        QString& sessionPath) const
 {
+    Q_UNUSED(sessionId);
     const QString homeDir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
     QDir dir(homeDir + "/Library/Application Support/ai.opencode.desktop");
     if (!dir.exists()) {
@@ -659,8 +797,7 @@ void SessionScanner::findLatestOpenCodeSessionArtifact(const QString& projectPat
         QDir::Files | QDir::NoDotAndDotDot,
         QDir::Time);
 
-    QFileInfo fallbackFile;
-    QString fallbackId;
+    const QString normalizedProjectPath = normalizePath(projectPath);
     for (const QFileInfo& fileInfo : files) {
         QFile file(fileInfo.filePath());
         if (!file.open(QIODevice::ReadOnly)) {
@@ -678,21 +815,173 @@ void SessionScanner::findLatestOpenCodeSessionArtifact(const QString& projectPat
             continue;
         }
 
-        if (fallbackId.isEmpty()) {
-            fallbackId = sessionIds.last();
-            fallbackFile = fileInfo;
-        }
-
-        if (workspaceTerminalMentionsProject(rawContent, projectPath)) {
-            sessionId = sessionIds.last();
+        if (!normalizedProjectPath.isEmpty() &&
+            workspaceTerminalMentionsProject(rawContent, normalizedProjectPath)) {
             sessionPath = fileInfo.filePath();
             return;
         }
     }
+}
 
-    if (!fallbackId.isEmpty()) {
-        sessionId = fallbackId;
-        sessionPath = fallbackFile.filePath();
+QStringList SessionScanner::collectOpenCodeSessionIdsForProject(const QString& projectPath) const
+{
+    QStringList sessionIds = collectOpenCodeSessionIdsFromDatabase(projectPath);
+    QSet<QString> seen(sessionIds.begin(), sessionIds.end());
+    const QString normalizedProjectPath = normalizePath(projectPath);
+    if (normalizedProjectPath.isEmpty()) {
+        return sessionIds;
+    }
+
+    const QString globalPath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation)
+        + "/Library/Application Support/ai.opencode.desktop/opencode.global.dat";
+    const QByteArray globalTail = readArtifactTail(globalPath, 524288);
+    if (!globalTail.isEmpty()) {
+        QJsonParseError globalError;
+        const QJsonDocument globalDoc = QJsonDocument::fromJson(globalTail, &globalError);
+        if (globalError.error == QJsonParseError::NoError && globalDoc.isObject()) {
+            const QJsonObject globalObject = globalDoc.object();
+            const QString notificationText = globalDoc.object().value("notification").toString();
+            if (!notificationText.isEmpty()) {
+                QJsonParseError notificationError;
+                const QJsonDocument notificationDoc = QJsonDocument::fromJson(notificationText.toUtf8(), &notificationError);
+                if (notificationError.error == QJsonParseError::NoError && notificationDoc.isObject()) {
+                    const QJsonArray notifications = notificationDoc.object().value("list").toArray();
+                    for (int i = notifications.size() - 1; i >= 0; --i) {
+                        const QJsonObject entry = notifications.at(i).toObject();
+                        const QString directory = normalizePath(entry.value("directory").toString());
+                        const QString sessionId = entry.value("session").toString();
+                        if (sessionId.isEmpty()) {
+                            continue;
+                        }
+                        if (!pathBelongsToProject(directory, normalizedProjectPath) &&
+                            !pathBelongsToProject(normalizedProjectPath, directory)) {
+                            continue;
+                        }
+                        if (!seen.contains(sessionId)) {
+                            seen.insert(sessionId);
+                            sessionIds.append(sessionId);
+                        }
+                    }
+                }
+            }
+
+            const QString layoutPageText = globalObject.value("layout.page").toString();
+            if (!layoutPageText.isEmpty()) {
+                QJsonParseError layoutError;
+                const QJsonDocument layoutDoc = QJsonDocument::fromJson(layoutPageText.toUtf8(), &layoutError);
+                if (layoutError.error == QJsonParseError::NoError && layoutDoc.isObject()) {
+                    const QJsonObject layoutObject = layoutDoc.object();
+
+                    const QJsonObject lastProjectSession = layoutObject.value("lastProjectSession").toObject();
+                    for (auto it = lastProjectSession.begin(); it != lastProjectSession.end(); ++it) {
+                        const QString directory = normalizePath(it.key());
+                        if (!pathBelongsToProject(directory, normalizedProjectPath) &&
+                            !pathBelongsToProject(normalizedProjectPath, directory)) {
+                            continue;
+                        }
+                        const QString sessionId = it.value().toObject().value("id").toString();
+                        if (!sessionId.isEmpty() && !seen.contains(sessionId)) {
+                            seen.insert(sessionId);
+                            sessionIds.append(sessionId);
+                        }
+                    }
+
+                    const QJsonObject lastSession = layoutObject.value("lastSession").toObject();
+                    for (auto it = lastSession.begin(); it != lastSession.end(); ++it) {
+                        const QString directory = normalizePath(it.key());
+                        if (!pathBelongsToProject(directory, normalizedProjectPath) &&
+                            !pathBelongsToProject(normalizedProjectPath, directory)) {
+                            continue;
+                        }
+                        const QString sessionId = it.value().toString();
+                        if (!sessionId.isEmpty() && !seen.contains(sessionId)) {
+                            seen.insert(sessionId);
+                            sessionIds.append(sessionId);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    const QString homeDir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    QDir dir(homeDir + "/Library/Application Support/ai.opencode.desktop");
+    if (!dir.exists()) {
+        return sessionIds;
+    }
+
+    const QFileInfoList files = dir.entryInfoList(
+        QStringList() << "opencode.workspace*.dat",
+        QDir::Files | QDir::NoDotAndDotDot,
+        QDir::Time);
+    for (const QFileInfo& fileInfo : files) {
+        QFile file(fileInfo.filePath());
+        if (!file.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        const QString rawContent = QString::fromUtf8(file.readAll());
+        file.close();
+
+        if (!workspaceTerminalMentionsProject(rawContent, normalizedProjectPath)) {
+            continue;
+        }
+
+        const QStringList fileSessionIds = extractUniqueOpenCodeSessionIds(rawContent);
+        for (const QString& sessionId : fileSessionIds) {
+            if (!seen.contains(sessionId)) {
+                seen.insert(sessionId);
+                sessionIds.append(sessionId);
+            }
+        }
+    }
+
+    return sessionIds;
+}
+
+void SessionScanner::assignClaudeSessionArtifacts(QList<SessionInfo>& sessions) const
+{
+    QHash<QString, QList<int>> byProject;
+    for (int i = 0; i < sessions.size(); ++i) {
+        if (sessions[i].toolName != "Claude") {
+            continue;
+        }
+        byProject[normalizePath(sessions[i].projectPath)].append(i);
+    }
+
+    for (auto it = byProject.begin(); it != byProject.end(); ++it) {
+        const QString projectPath = it.key();
+        if (projectPath.isEmpty()) {
+            continue;
+        }
+
+        const QList<GenericSessionArtifact> artifacts = collectClaudeSessionArtifacts(projectPath);
+        if (artifacts.isEmpty()) {
+            continue;
+        }
+
+        QList<int> sortedIndexes = it.value();
+        std::sort(sortedIndexes.begin(), sortedIndexes.end(), [&](int lhs, int rhs) {
+            const SessionInfo& left = sessions[lhs];
+            const SessionInfo& right = sessions[rhs];
+            if (left.shellPid != right.shellPid) {
+                return left.shellPid < right.shellPid;
+            }
+            return left.processPid < right.processPid;
+        });
+
+        const int assignCount = qMin(sortedIndexes.size(), artifacts.size());
+        for (int i = 0; i < assignCount; ++i) {
+            SessionInfo& session = sessions[sortedIndexes[i]];
+            const GenericSessionArtifact& artifact = artifacts.at(i);
+            session.sessionId = artifact.sessionId;
+            session.sessionPath = artifact.sessionPath;
+            const SessionStatus artifactStatus = inferArtifactStatus(session.toolName,
+                                                                     session.sessionId,
+                                                                     session.sessionPath);
+            if (artifactStatus != SessionStatus::Unknown) {
+                session.status = artifactStatus;
+            }
+        }
     }
 }
 
@@ -703,7 +992,6 @@ void SessionScanner::resolveSessionArtifact(const QString& projectPath, const QS
     const QString hintedSessionId = extractSessionIdFromCommand(cmd, toolName);
 
     if (toolName == "Claude") {
-        findLatestClaudeSessionArtifact(projectPath, sessionId, sessionPath);
         return;
     }
 
@@ -780,21 +1068,24 @@ QList<SessionInfo> SessionScanner::detectTerminalProcessSessions(
                 si.terminalName = terminalLabel;
                 si.terminalIconPath = terminalIconPath(terminalLabel);
                 si.terminalPid = termPid;
+                si.shellPid = shellPid;
                 si.processPid = pid;
                 si.toolName = toolName;
                 si.toolIconPath = toolIconPath(toolName);
-                si.projectPath = cwd;
+                si.projectPath = normalizePath(cwd);
                 si.lastActivity = QDateTime::currentDateTime();
                 si.detailText = cmd;
-                resolveSessionArtifact(cwd, toolName, cmd, si.sessionId, si.sessionPath);
+                resolveSessionArtifact(si.projectPath, toolName, cmd, si.sessionId, si.sessionPath);
                 if (si.sessionId.isEmpty()) {
                     si.sessionId = QString("unknown");
                 }
                 si.status = determineStatus(pid, ticks, isRunning, si.toolName, si.sessionId, si.sessionPath);
 
-                const QString dedupeSessionId = (si.sessionId.isEmpty() || si.sessionId == "unknown")
-                    ? QString("pid-%1").arg(pid)
-                    : si.sessionId;
+                const QString dedupeSessionId = hasKnownSessionId(si.sessionId)
+                    ? si.sessionId
+                    : (!si.sessionPath.isEmpty()
+                        ? si.sessionPath
+                        : QString("shell-%1").arg(shellPid));
                 const QString groupKey = QString("%1|%2|%3")
                     .arg(si.projectPath, si.toolName, dedupeSessionId);
 
@@ -804,17 +1095,7 @@ QList<SessionInfo> SessionScanner::detectTerminalProcessSessions(
                 }
 
                 SessionInfo existing = groupedSessions.value(groupKey);
-                if (si.status == SessionStatus::Working && existing.status != SessionStatus::Working) {
-                    groupedSessions[groupKey] = si;
-                    continue;
-                }
-
-                if (si.status == existing.status && isRunning && !isProcessRunning(existing.processPid)) {
-                    groupedSessions[groupKey] = si;
-                    continue;
-                }
-
-                if (si.status == existing.status && si.processPid > existing.processPid) {
+                if (isBetterSessionCandidate(si, existing)) {
                     groupedSessions[groupKey] = si;
                 }
             }
@@ -845,6 +1126,19 @@ void SessionScanner::assignCodexSessionArtifacts(QList<SessionInfo>& sessions) c
         return;
     }
 
+    auto applyArtifact = [&](SessionInfo& session, const CodexSessionArtifact& artifact) {
+        session.sessionId = artifact.sessionId;
+        session.sessionPath = artifact.sessionPath;
+        if (!artifact.projectPath.isEmpty()) {
+            session.projectPath = artifact.projectPath;
+        }
+        const SessionStatus artifactStatus = inferArtifactStatus(session.toolName, session.sessionId,
+                                                                 session.sessionPath);
+        if (artifactStatus != SessionStatus::Unknown) {
+            session.status = artifactStatus;
+        }
+    };
+
     QSet<QString> usedPaths;
 
     for (int index : codexIndexes) {
@@ -854,7 +1148,7 @@ void SessionScanner::assignCodexSessionArtifacts(QList<SessionInfo>& sessions) c
         }
         for (const CodexSessionArtifact& artifact : artifacts) {
             if (artifact.sessionId == session.sessionId) {
-                session.sessionPath = artifact.sessionPath;
+                applyArtifact(session, artifact);
                 usedPaths.insert(artifact.sessionPath);
                 break;
             }
@@ -879,7 +1173,8 @@ void SessionScanner::assignCodexSessionArtifacts(QList<SessionInfo>& sessions) c
             if (usedPaths.contains(artifact.sessionPath)) {
                 continue;
             }
-            if (!projectPath.isEmpty() && artifact.projectPath == projectPath) {
+            if (!projectPath.isEmpty() &&
+                pathBelongsToProject(projectPath, artifact.projectPath)) {
                 matched.append(artifact);
             } else if (artifact.projectPath.isEmpty()) {
                 fallback.append(artifact);
@@ -892,9 +1187,61 @@ void SessionScanner::assignCodexSessionArtifacts(QList<SessionInfo>& sessions) c
         const int assignCount = qMin(indexes.size(), pool.size());
         for (int i = 0; i < assignCount; ++i) {
             SessionInfo& session = sessions[indexes[i]];
-            session.sessionId = pool[i].sessionId;
-            session.sessionPath = pool[i].sessionPath;
+            applyArtifact(session, pool[i]);
             usedPaths.insert(pool[i].sessionPath);
+        }
+    }
+}
+
+void SessionScanner::assignOpenCodeSessionMetadata(QList<SessionInfo>& sessions) const
+{
+    QHash<QString, QList<int>> byProject;
+    for (int i = 0; i < sessions.size(); ++i) {
+        if (sessions[i].toolName != "OpenCode") {
+            continue;
+        }
+        byProject[normalizePath(sessions[i].projectPath)].append(i);
+    }
+
+    for (auto it = byProject.begin(); it != byProject.end(); ++it) {
+        const QString projectPath = it.key();
+        if (projectPath.isEmpty()) {
+            continue;
+        }
+
+        const QStringList candidateIds = collectOpenCodeSessionIdsForProject(projectPath);
+        const QList<int> indexes = it.value();
+        if (candidateIds.isEmpty()) {
+            continue;
+        }
+
+        QList<int> sortedIndexes = indexes;
+        std::sort(sortedIndexes.begin(), sortedIndexes.end(), [&](int lhs, int rhs) {
+            const SessionInfo& left = sessions[lhs];
+            const SessionInfo& right = sessions[rhs];
+            if (left.shellPid != right.shellPid) {
+                return left.shellPid < right.shellPid;
+            }
+            return left.processPid < right.processPid;
+        });
+
+        QString inferredSessionPath;
+        QString ignoredSessionId;
+        findLatestOpenCodeSessionArtifact(projectPath, ignoredSessionId, inferredSessionPath);
+
+        const int assignCount = qMin(sortedIndexes.size(), candidateIds.size());
+        for (int i = 0; i < assignCount; ++i) {
+            SessionInfo& session = sessions[sortedIndexes[i]];
+            session.sessionId = candidateIds.at(i);
+            if (session.sessionPath.isEmpty() && !inferredSessionPath.isEmpty()) {
+                session.sessionPath = inferredSessionPath;
+            }
+            const SessionStatus artifactStatus = inferArtifactStatus(session.toolName,
+                                                                     session.sessionId,
+                                                                     session.sessionPath);
+            if (artifactStatus != SessionStatus::Unknown) {
+                session.status = artifactStatus;
+            }
         }
     }
 }
@@ -909,21 +1256,23 @@ QMap<QString, QList<SessionInfo>> SessionScanner::groupByProject(
         QString bestProjectPath;
         QString bestProjectName;
         int bestLen = -1;
+        const QString normalizedSessionProjectPath = normalizePath(si.projectPath);
 
         for (const auto& proj : projects) {
             const QString& projName = proj.first;
-            const QString& projPath = proj.second;
-            if (si.projectPath == projPath || si.projectPath.startsWith(projPath + "/")) {
-                if (projPath.length() > bestLen) {
-                    bestLen = projPath.length();
-                    bestProjectPath = projPath;
+            const QString normalizedProjectPath = normalizePath(proj.second);
+            if (pathBelongsToProject(normalizedSessionProjectPath, normalizedProjectPath)) {
+                if (normalizedProjectPath.length() > bestLen) {
+                    bestLen = normalizedProjectPath.length();
+                    bestProjectPath = normalizedProjectPath;
                     bestProjectName = projName;
                 }
             }
         }
 
-        QString key = bestProjectPath.isEmpty() ? si.projectPath : bestProjectPath;
+        QString key = bestProjectPath.isEmpty() ? normalizedSessionProjectPath : bestProjectPath;
         SessionInfo copy = si;
+        copy.projectPath = normalizedSessionProjectPath;
         copy.projectName = bestProjectName;
         if (copy.projectName.isEmpty()) {
             QFileInfo fi(copy.projectPath);
@@ -943,10 +1292,14 @@ QList<ProjectMonitorData> SessionScanner::scanLiveSessions(
 
     auto addUnique = [&](const QList<SessionInfo>& sessions) {
         for (const SessionInfo& si : sessions) {
-            const QString uniqueKey = QString("%1|%2|%3|%4")
+            const QString normalizedProjectPath = normalizePath(si.projectPath);
+            const QString stableSessionKey = hasKnownSessionId(si.sessionId)
+                ? si.sessionId
+                : (!si.sessionPath.isEmpty() ? si.sessionPath : QString::number(si.processPid));
+            const QString uniqueKey = QString("%1|%2|%3|%4|%5")
                 .arg(si.terminalPid)
-                .arg(si.processPid)
-                .arg(si.projectPath, si.toolName);
+                .arg(si.shellPid)
+                .arg(si.toolName, normalizedProjectPath, stableSessionKey);
             if (!seenIds.contains(uniqueKey)) {
                 seenIds.insert(uniqueKey);
                 allSessions.append(si);
@@ -957,7 +1310,10 @@ QList<ProjectMonitorData> SessionScanner::scanLiveSessions(
     addUnique(detectTerminalProcessSessions("wezterm", "WezTerm"));
     addUnique(detectTerminalProcessSessions("iTerm", "iTerm2"));
     addUnique(detectTerminalProcessSessions("Terminal", "Terminal.app"));
+    addUnique(detectTerminalProcessSessions("ghostty", "Ghostty"));
+    assignClaudeSessionArtifacts(allSessions);
     assignCodexSessionArtifacts(allSessions);
+    assignOpenCodeSessionMetadata(allSessions);
 
     QList<ProjectMonitorData> result;
     QMap<QString, QList<SessionInfo>> grouped = groupByProject(allSessions, projects);

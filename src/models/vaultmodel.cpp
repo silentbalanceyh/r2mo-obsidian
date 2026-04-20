@@ -1,6 +1,7 @@
 #include "vaultmodel.h"
 #include <QFile>
 #include <QJsonDocument>
+#include <QSet>
 
 QJsonObject Vault::toJson() const
 {
@@ -52,6 +53,41 @@ void VaultModel::updateVault(const QString& path, const Vault& vault)
         emit vaultUpdated(vault);
         emit modelChanged();
     }
+}
+
+void VaultModel::reorderVaults(const QStringList& orderedPaths)
+{
+    if (orderedPaths.isEmpty() || orderedPaths.size() != m_vaults.size()) {
+        return;
+    }
+
+    QList<Vault> reordered;
+    reordered.reserve(m_vaults.size());
+    QSet<QString> seenPaths;
+
+    for (const QString& path : orderedPaths) {
+        const int index = indexOf(path);
+        if (index < 0 || seenPaths.contains(path)) {
+            return;
+        }
+        reordered.append(m_vaults.at(index));
+        seenPaths.insert(path);
+    }
+
+    bool changed = false;
+    for (int i = 0; i < m_vaults.size(); ++i) {
+        if (m_vaults.at(i).path != reordered.at(i).path) {
+            changed = true;
+            break;
+        }
+    }
+
+    if (!changed) {
+        return;
+    }
+
+    m_vaults = reordered;
+    emit modelChanged();
 }
 
 QList<Vault> VaultModel::vaults() const

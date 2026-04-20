@@ -27,6 +27,7 @@ public:
     void addVault(const Vault& vault);
     void removeVault(const QString& path);
     void updateVault(const QString& path, const Vault& vault);
+    void reorderVaults(const QStringList& orderedPaths);
     
     QList<Vault> vaults() const;
     Vault vaultAt(int index) const;

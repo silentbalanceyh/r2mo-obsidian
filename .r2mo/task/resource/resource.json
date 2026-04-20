@@ -1,0 +1,133 @@
+{
+    "data": {
+        "logs": [
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 51584,
+                "completion_tokens": 774,
+                "created_at": 1776651578,
+                "created_time": "2026-04-20 10:19:38",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 58780,
+                "quota": 7500000
+            },
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 40320,
+                "completion_tokens": 741,
+                "created_at": 1776651560,
+                "created_time": "2026-04-20 10:19:20",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 54430,
+                "quota": 7500000
+            },
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 45952,
+                "completion_tokens": 544,
+                "created_at": 1776651476,
+                "created_time": "2026-04-20 10:17:56",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 51679,
+                "quota": 7500000
+            },
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 39168,
+                "completion_tokens": 874,
+                "created_at": 1776651460,
+                "created_time": "2026-04-20 10:17:40",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 46081,
+                "quota": 7500000
+            },
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 6528,
+                "completion_tokens": 545,
+                "created_at": 1776651440,
+                "created_time": "2026-04-20 10:17:20",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 40569,
+                "quota": 7500000
+            },
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 14080,
+                "completion_tokens": 384,
+                "created_at": 1776651381,
+                "created_time": "2026-04-20 10:16:21",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 39263,
+                "quota": 7500000
+            },
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "completion_tokens": 2140,
+                "created_at": 1776651369,
+                "created_time": "2026-04-20 10:16:09",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 209839,
+                "quota": 7500000
+            },
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 217984,
+                "completion_tokens": 152,
+                "created_at": 1776651314,
+                "created_time": "2026-04-20 10:15:14",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 220446,
+                "quota": 7500000
+            },
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 216960,
+                "completion_tokens": 189,
+                "created_at": 1776651288,
+                "created_time": "2026-04-20 10:14:48",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 220197,
+                "quota": 7500000
+            },
+            {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 217728,
+                "completion_tokens": 152,
+                "created_at": 1776651260,
+                "created_time": "2026-04-20 10:14:20",
+                "model_name": "gpt-5.4",
+                "prompt_tokens": 219915,
+                "quota": 7500000
+            }
+        ],
+        "pagination": {
+            "page": 1,
+            "page_size": 10,
+            "total": 234,
+            "total_pages": 24
+        },
+        "token_info": {
+            "expired_time_formatted": "2026-05-14 09:31:03",
+            "expiry": {
+                "raw_timestamp": 1778722263,
+                "status": "active",
+                "time": "2026-05-14 09:31:03"
+            },
+            "name": "silentbalanceyh-xsvip",
+            "remain_quota_display": 3975,
+            "status": {
+                "code": 1,
+                "text": "\u6b63\u5e38",
+                "type": "active"
+            },
+            "today_added_quota": 7485,
+            "today_big_token_requests": 0,
+            "today_opus_usage": 0,
+            "today_usage_count": 234,
+            "today_used_quota": 3510
+        }
+    },
+    "success": true
+}

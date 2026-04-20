@@ -1,6 +1,85 @@
 #include "thememanager.h"
 #include <QSettings>
 
+namespace {
+QString encodedColor(QString color)
+{
+    return color.replace("#", "%23");
+}
+
+QString branchChevronDataUri(const QString& color, bool open)
+{
+    const QString path = open
+        ? QStringLiteral("M4.5 6L8 10L11.5 6")
+        : QStringLiteral("M6 4.5L10 8L6 11.5");
+
+    return QStringLiteral(
+        "url(\"data:image/svg+xml;utf8,"
+        "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'>"
+        "<path d='%1' fill='none' stroke='%2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>"
+        "</svg>\")")
+        .arg(path, encodedColor(color));
+}
+
+QString branchIndicatorStyle(const QString& branchColor, const QString& selectedBranchColor)
+{
+    return QStringLiteral(R"(
+/* Branch indicators - themed and shared by all tree controls */
+QTreeWidget::branch,
+QTreeView::branch {
+    background-color: transparent;
+}
+
+QTreeWidget::branch:has-children:!has-siblings:closed,
+QTreeWidget::branch:closed:has-children:has-siblings,
+QTreeView::branch:has-children:!has-siblings:closed,
+QTreeView::branch:closed:has-children:has-siblings {
+    border-image: none;
+    image: %1;
+}
+
+QTreeWidget::branch:open:has-children:!has-siblings,
+QTreeWidget::branch:open:has-children:has-siblings,
+QTreeView::branch:open:has-children:!has-siblings,
+QTreeView::branch:open:has-children:has-siblings {
+    border-image: none;
+    image: %2;
+}
+
+QTreeWidget::branch:selected:has-children:!has-siblings:closed,
+QTreeWidget::branch:selected:closed:has-children:has-siblings,
+QTreeView::branch:selected:has-children:!has-siblings:closed,
+QTreeView::branch:selected:closed:has-children:has-siblings {
+    border-image: none;
+    image: %3;
+}
+
+QTreeWidget::branch:selected:open:has-children:!has-siblings,
+QTreeWidget::branch:selected:open:has-children:has-siblings,
+QTreeView::branch:selected:open:has-children:!has-siblings,
+QTreeView::branch:selected:open:has-children:has-siblings {
+    border-image: none;
+    image: %4;
+}
+
+QTreeWidget::branch:has-siblings:!has-children,
+QTreeWidget::branch:has-siblings:has-children,
+QTreeView::branch:has-siblings:!has-children,
+QTreeView::branch:has-siblings:has-children,
+QTreeWidget::branch:has-siblings:adjoins-item,
+QTreeWidget::branch:!has-children:!has-siblings:adjoins-item,
+QTreeView::branch:has-siblings:adjoins-item,
+QTreeView::branch:!has-children:!has-siblings:adjoins-item {
+    border-image: none;
+}
+)")
+        .arg(branchChevronDataUri(branchColor, false),
+             branchChevronDataUri(branchColor, true),
+             branchChevronDataUri(selectedBranchColor, false),
+             branchChevronDataUri(selectedBranchColor, true));
+}
+}
+
 ThemeManager* ThemeManager::instance()
 {
     static ThemeManager manager;
@@ -58,7 +137,7 @@ QFont ThemeManager::monoFont()
 
 QString ThemeManager::lightStyle() const
 {
-    return R"(
+    return QStringLiteral(R"(
 /* Light Theme - Global Settings */
 QWidget {
     font-family: "MesloLGS NF", "PingFang SC", sans-serif;
@@ -315,39 +394,7 @@ QTreeWidget::item:selected:hover {
     background-color: #0066d6;
 }
 
-/* Branch indicators - different icons for expand/collapse with guide lines */
-QTreeWidget::branch {
-    background-color: transparent;
-}
-
-QTreeWidget::branch:has-children:!has-siblings:closed,
-QTreeWidget::branch:closed:has-children:has-siblings {
-    border-image: none;
-    image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNiIgc3Ryb2tlPSIjMDA3YWZmIiBzdHJva2Utd2lkdGg9IjIiIGZpbGw9IiNmMGY4ZmYiLz48cGF0aCBkPSJNNiA4SDEwIiBzdHJva2U9IiMwMDdhZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+);
-}
-
-QTreeWidget::branch:open:has-children:!has-siblings,
-QTreeWidget::branch:open:has-children:has-siblings {
-    border-image: none;
-    image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNiIgc3Ryb2tlPSIjMzRjNzU5IiBzdHJva2Utd2lkdGg9IjIiIGZpbGw9IiNmMGZjZjAiLz48cGF0aCBkPSJNNiA4SDEwTTggNlYxMCIgc3Ryb2tlPSIjMzRjNzU5IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjwvc3ZnPg==);
-}
-
-QTreeWidget::branch:has-siblings:!has-children {
-    border-image: none;
-}
-
-QTreeWidget::branch:has-siblings:has-children {
-    border-image: none;
-}
-
-/* Guide lines connecting items */
-QTreeWidget::branch:has-siblings:adjoins-item {
-    border-image: none;
-}
-
-QTreeWidget::branch:!has-children:!has-siblings:adjoins-item {
-    border-image: none;
-}
+%1
 
 QHeaderView::section {
     background-color: #f5f5f7;
@@ -615,12 +662,13 @@ QPushButton#monitorBtn {
 QPushButton#monitorBtn:hover {
     background-color: rgba(0, 0, 0, 0.04);
 }
-)";
+)")
+        .arg(branchIndicatorStyle("#3a3a3c", "#ffffff"));
 }
 
 QString ThemeManager::darkStyle() const
 {
-    return R"(
+    return QStringLiteral(R"(
 /* Dark Theme - Global Settings */
 QWidget {
     font-family: "MesloLGS NF", "PingFang SC", sans-serif;
@@ -880,39 +928,7 @@ QTreeWidget::item:selected:hover {
     background-color: #0066cc;
 }
 
-/* Branch indicators - different icons for expand/collapse with guide lines - dark theme */
-QTreeWidget::branch {
-    background-color: transparent;
-}
-
-QTreeWidget::branch:has-children:!has-siblings:closed,
-QTreeWidget::branch:closed:has-children:has-siblings {
-    border-image: none;
-    image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNiIgc3Ryb2tlPSIjMGE4NGZmIiBzdHJva2Utd2lkdGg9IjIiIGZpbGw9IiMyYzJjMmUiLz48cGF0aCBkPSJNNiA4SDEwIiBzdHJva2U9IiMwYTg0ZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+);
-}
-
-QTreeWidget::branch:open:has-children:!has-siblings,
-QTreeWidget::branch:open:has-children:has-siblings {
-    border-image: none;
-    image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNiIgc3Ryb2tlPSIjMzRjNzU5IiBzdHJva2Utd2lkdGg9IjIiIGZpbGw9IiMyYzJjMmUiLz48cGF0aCBkPSJNNiA4SDEwTTggNlYxMCIgc3Ryb2tlPSIjMzRjNzU5IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjwvc3ZnPg==);
-}
-
-QTreeWidget::branch:has-siblings:!has-children {
-    border-image: none;
-}
-
-QTreeWidget::branch:has-siblings:has-children {
-    border-image: none;
-}
-
-/* Guide lines connecting items */
-QTreeWidget::branch:has-siblings:adjoins-item {
-    border-image: none;
-}
-
-QTreeWidget::branch:!has-children:!has-siblings:adjoins-item {
-    border-image: none;
-}
+%1
 
 QHeaderView::section {
     background-color: #3a3a3c;
@@ -1188,7 +1204,8 @@ QPushButton#monitorBtn {
 QPushButton#monitorBtn:hover {
     background-color: rgba(255, 255, 255, 0.05);
 }
-)";
+)")
+        .arg(branchIndicatorStyle("#d0d0d4", "#ffffff"));
 }
 
 QString ThemeManager::currentStyle() const

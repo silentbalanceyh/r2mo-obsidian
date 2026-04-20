@@ -18,6 +18,7 @@
 #include <QGridLayout>
 #include <QTimer>
 #include <QFutureWatcher>
+#include <QStringList>
 #include "theme/thememanager.h"
 #include "utils/gitscanner.h"
 #include "utils/aitoolscanner.h"
@@ -91,6 +92,7 @@ private:
     void updateVaultList();
     void updatePreviewPane(const QString& name, const QString& path);
     void openVaultInObsidian(const QString& vaultPath);
+    QString resolveObsidianOpenPath(const QString& vaultPath) const;
     void onPreviewEditClicked();
     void onPreviewOpenClicked();
     void onPreviewTitleEditFinished();
@@ -131,7 +133,10 @@ private:
     QString monitorRowKey(const QString& projectPath, const SessionInfo& session) const;
     void updateMonitorStatusLabel(QLabel *label, SessionStatus status) const;
     void showSessionDetailDialog(const SessionInfo& session);
-    void activateTerminalWindow(qint64 pid);
+    void syncVaultOrderFromList();
+    void openMonitorTarget(QTreeWidgetItem *row);
+    void invalidateMonitorView(bool refreshIfOpen);
+    bool activateTerminalWindow(qint64 pid);
 
     // Toolbar
     QToolBar *m_toolBar;
