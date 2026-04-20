@@ -4,5 +4,8 @@
         <file>ui/swimlane.svg</file>
         <file>ui/monitor.svg</file>
         <file>ui/home.svg</file>
+        <file>ui/terminal-wezterm.svg</file>
+        <file>ui/terminal-iterm.svg</file>
+        <file>ui/terminal-macos.svg</file>
     </qresource>
 </RCC>

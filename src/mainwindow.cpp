@@ -854,7 +854,7 @@ void MainWindow::setupConnections()
     
     // Monitor refresh timer (15 seconds)
     m_monitorRefreshTimer = new QTimer(this);
-    m_monitorRefreshTimer->setInterval(15000);
+    m_monitorRefreshTimer->setInterval(2000);
     connect(m_monitorRefreshTimer, &QTimer::timeout, this, &MainWindow::onMonitorRefresh);
     m_monitorRefreshTimer->start();
     
@@ -863,19 +863,9 @@ void MainWindow::setupConnections()
     connect(m_monitorScanWatcher, &QFutureWatcher<QList<ProjectMonitorData>>::finished, this, [this]() {
         if (m_monitorRefreshing) {
             QList<ProjectMonitorData> data = m_monitorScanWatcher->result();
-            QWidget *newWidget = buildMonitorView(data);
-            
-            m_cachedMonitorWidget = newWidget;
-            
-            if (m_monitorTabContent && m_mainTabWidget->indexOf(m_monitorTabContent) >= 0) {
-                int idx = m_mainTabWidget->indexOf(m_monitorTabContent);
-                if (m_mainTabWidget->currentIndex() == idx) {
-                    m_mainTabWidget->removeTab(idx);
-                    m_monitorTabContent = newWidget;
-                    int newIdx = m_mainTabWidget->addTab(m_monitorTabContent, tr("Monitor Board"));
-                    addMonitorCloseButton(newIdx);
-                    m_mainTabWidget->setCurrentIndex(newIdx);
-                }
+            if (!updateMonitorStatusCells(data)) {
+                QWidget *newWidget = buildMonitorView(data);
+                replaceMonitorContent(newWidget, true);
             }
             m_monitorRefreshing = false;
         }
@@ -2669,6 +2659,13 @@ void MainWindow::onAbout()
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    if (QTreeWidget *tree = qobject_cast<QTreeWidget*>(watched)) {
+        if (tree->property("isMonitorTree").toBool() &&
+            (event->type() == QEvent::Resize || event->type() == QEvent::Show || event->type() == QEvent::LayoutRequest)) {
+            updateMonitorTableColumns(tree);
+        }
+    }
+
     // Handle wheel events for graph view zoom
     if (watched == m_graphView && event->type() == QEvent::Wheel) {
         QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
@@ -2977,7 +2974,7 @@ void MainWindow::openMonitorTab()
     QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
         QList<QPair<QString, QString>> projects = collectAllProjectPaths();
         SessionScanner scanner;
-        return scanner.scanAllProjects(projects);
+        return scanner.scanLiveSessions(projects);
     });
     m_monitorScanWatcher->setFuture(future);
     
@@ -2995,7 +2992,7 @@ void MainWindow::onMonitorRefresh()
     QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
         QList<QPair<QString, QString>> projects = collectAllProjectPaths();
         SessionScanner scanner;
-        return scanner.scanAllProjects(projects);
+        return scanner.scanLiveSessions(projects);
     });
     m_monitorScanWatcher->setFuture(future);
 }
@@ -3004,48 +3001,128 @@ void MainWindow::refreshMonitorAsync()
 {
     if (m_monitorRefreshing) return;
     if (!m_monitorTabContent) return;
-    
-    int idx = m_mainTabWidget->indexOf(m_monitorTabContent);
-    if (idx < 0) return;
-    
+
     m_monitorRefreshing = true;
-    
-    QWidget *loadingOverlay = new QWidget();
-    loadingOverlay->setStyleSheet("background: rgba(255, 255, 255, 0.95);");
-    QVBoxLayout *overlayLayout = new QVBoxLayout(loadingOverlay);
-    overlayLayout->setAlignment(Qt::AlignCenter);
-    overlayLayout->setSpacing(16);
-    
-    QLabel *titleLabel = new QLabel(tr("Refreshing Monitor Board"));
-    titleLabel->setAlignment(Qt::AlignCenter);
-    titleLabel->setStyleSheet("QLabel { color: #333; font-size: 18px; font-weight: 600; background: transparent; }");
-    overlayLayout->addWidget(titleLabel);
-    
-    m_monitorProgressLabel = new QLabel(tr("Scanning sessions..."));
-    m_monitorProgressLabel->setAlignment(Qt::AlignCenter);
-    m_monitorProgressLabel->setStyleSheet("QLabel { color: #86868b; font-size: 14px; background: transparent; }");
-    overlayLayout->addWidget(m_monitorProgressLabel);
-    
-    QProgressBar *progressBar = new QProgressBar();
-    progressBar->setRange(0, 0);
-    progressBar->setFixedWidth(300);
-    progressBar->setTextVisible(false);
-    progressBar->setStyleSheet("QProgressBar { border: 1px solid #e0e0e0; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #34c759; border-radius: 3px; }");
-    overlayLayout->addWidget(progressBar);
-    
-    m_cachedMonitorWidget = m_monitorTabContent;
-    m_mainTabWidget->removeTab(idx);
-    m_monitorTabContent = loadingOverlay;
-    int newIdx = m_mainTabWidget->addTab(m_monitorTabContent, tr("Monitor Board"));
-    addMonitorCloseButton(newIdx);
-    m_mainTabWidget->setCurrentIndex(newIdx);
-    
+
     QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
         QList<QPair<QString, QString>> projects = collectAllProjectPaths();
         SessionScanner scanner;
-        return scanner.scanAllProjects(projects);
+        return scanner.scanLiveSessions(projects);
     });
     m_monitorScanWatcher->setFuture(future);
+}
+
+void MainWindow::replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab)
+{
+    if (!newContent) {
+        return;
+    }
+
+    m_cachedMonitorWidget = newContent;
+
+    if (!m_monitorTabContent) {
+        m_monitorTabContent = newContent;
+        return;
+    }
+
+    const int idx = m_mainTabWidget->indexOf(m_monitorTabContent);
+    if (idx < 0) {
+        if (m_monitorTabContent != newContent) {
+            m_monitorTabContent->deleteLater();
+        }
+        m_monitorTabContent = newContent;
+        return;
+    }
+
+    const bool wasCurrent = (m_mainTabWidget->currentIndex() == idx);
+    m_mainTabWidget->removeTab(idx);
+    if (m_monitorTabContent != newContent) {
+        m_monitorTabContent->deleteLater();
+    }
+    m_monitorTabContent = newContent;
+
+    const int newIdx = m_mainTabWidget->insertTab(idx, m_monitorTabContent, tr("Monitor Board"));
+    addMonitorCloseButton(newIdx);
+    if (preserveCurrentTab && wasCurrent) {
+        m_mainTabWidget->setCurrentIndex(newIdx);
+    }
+}
+
+QString MainWindow::monitorRowKey(const QString& projectPath, const SessionInfo& session) const
+{
+    const QString stableSessionKey = session.sessionId.isEmpty() || session.sessionId == "unknown"
+        ? QString("pid-%1").arg(session.processPid)
+        : session.sessionId;
+    return QString("%1|%2|%3")
+        .arg(projectPath, session.toolName, stableSessionKey);
+}
+
+void MainWindow::updateMonitorStatusLabel(QLabel *label, SessionStatus status) const
+{
+    if (!label) {
+        return;
+    }
+
+    QString statusText;
+    QString statusColor;
+    if (status == SessionStatus::Working) {
+        statusColor = "#34c759";
+        statusText = tr("Working");
+    } else {
+        statusColor = "#007aff";
+        statusText = tr("Ready");
+    }
+
+    label->setText(QString("<span style='color: %1; font-size: 13px;'>&#9679;</span> <span style='font-size: 12px;'>%2</span>")
+                       .arg(statusColor, statusText));
+    label->setToolTip(statusText);
+}
+
+bool MainWindow::updateMonitorStatusCells(const QList<ProjectMonitorData>& data)
+{
+    if (!m_monitorTabContent) {
+        return false;
+    }
+
+    QTreeWidget *tree = m_monitorTabContent->findChild<QTreeWidget*>("monitorBoardTree");
+    if (!tree) {
+        return false;
+    }
+
+    QList<QPair<QString, SessionStatus>> expectedRows;
+    for (const ProjectMonitorData& pmd : data) {
+        for (const SessionInfo& si : pmd.sessions) {
+            expectedRows.append(qMakePair(monitorRowKey(pmd.projectPath, si), si.status));
+        }
+    }
+
+    if (tree->topLevelItemCount() != expectedRows.size()) {
+        return false;
+    }
+
+    for (int i = 0; i < expectedRows.size(); ++i) {
+        QTreeWidgetItem *row = tree->topLevelItem(i);
+        if (!row) {
+            return false;
+        }
+        if (row->data(0, Qt::UserRole + 10).toString() != expectedRows[i].first) {
+            return false;
+        }
+    }
+
+    for (int i = 0; i < expectedRows.size(); ++i) {
+        QTreeWidgetItem *row = tree->topLevelItem(i);
+        if (!row) {
+            continue;
+        }
+
+        const SessionStatus status = expectedRows[i].second;
+        row->setData(0, Qt::UserRole + 6, static_cast<int>(status));
+        QLabel *statusLabel = qobject_cast<QLabel*>(tree->itemWidget(row, 4));
+        updateMonitorStatusLabel(statusLabel, status);
+    }
+
+    return true;
 }
 
 QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorData)
@@ -3089,121 +3166,120 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
 
     mainLayout->addLayout(legendLayout);
 
-    // Single tree widget
+    // Flat table - no tree nesting
     QTreeWidget *tree = new QTreeWidget();
-    tree->setHeaderLabels(QStringList() << tr("Project") << tr("Terminal") << tr("AI Tool") << tr("Session / Status"));
-    tree->setRootIsDecorated(true);
+    tree->setObjectName("monitorBoardTree");
+    tree->setHeaderLabels(QStringList()
+        << tr("Project") << tr("Terminal") << tr("AI Tool")
+        << tr("Session") << tr("Status") << tr("Action"));
+    tree->setRootIsDecorated(false);
     tree->setAlternatingRowColors(true);
-    tree->setUniformRowHeights(false);
-    tree->setSelectionMode(QAbstractItemView::SingleSelection);
-    tree->header()->setStretchLastSection(true);
-    tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    tree->setUniformRowHeights(true);
+    tree->setSelectionMode(QAbstractItemView::NoSelection);
+    tree->setTextElideMode(Qt::ElideMiddle);
+    tree->setProperty("isMonitorTree", true);
+    tree->installEventFilter(this);
+    tree->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    tree->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tree->header()->setStretchLastSection(false);
+    tree->header()->setMinimumSectionSize(72);
+    tree->header()->setSectionResizeMode(0, QHeaderView::Fixed);
+    tree->header()->setSectionResizeMode(1, QHeaderView::Fixed);
+    tree->header()->setSectionResizeMode(2, QHeaderView::Fixed);
+    tree->header()->setSectionResizeMode(3, QHeaderView::Fixed);
+    tree->header()->setSectionResizeMode(4, QHeaderView::Fixed);
+    tree->header()->setSectionResizeMode(5, QHeaderView::Fixed);
     tree->setStyleSheet(
         "QTreeWidget { border: 1px solid #e8e8ed; border-radius: 6px; background: white; }"
-        "QTreeWidget::item { padding: 4px 8px; border-bottom: 1px solid #f5f5f7; }"
+        "QTreeWidget::item { padding: 6px 10px; border-bottom: 1px solid #f5f5f7; }"
         "QTreeWidget::item:selected { background: #e8f4fd; color: #1d1d1f; }"
-        "QHeaderView::section { background: #f5f5f7; color: #86868b; font-size: 12px; font-weight: 600; padding: 6px 8px; border: none; border-bottom: 1px solid #e0e0e0; }"
+        "QHeaderView::section { background: #f5f5f7; color: #86868b; font-size: 12px; font-weight: 600; padding: 6px 4px; border: none; border-bottom: 1px solid #e0e0e0; }"
     );
 
     if (monitorData.isEmpty()) {
         QTreeWidgetItem *emptyItem = new QTreeWidgetItem(tree);
         emptyItem->setText(0, tr("No active AI sessions detected."));
         emptyItem->setForeground(0, QColor("#86868b"));
-        QTreeWidgetItem *hintItem = new QTreeWidgetItem(tree);
-        hintItem->setText(0, tr("WezTerm, iTerm2, Terminal.app sessions are monitored."));
-        hintItem->setForeground(0, QColor("#86868b"));
+        emptyItem->setFirstColumnSpanned(true);
     } else {
+        QString lastProjectName;
         for (const ProjectMonitorData& pmd : monitorData) {
-            QTreeWidgetItem *projItem = new QTreeWidgetItem(tree);
-            projItem->setText(0, pmd.projectName);
-
-            // Summary badges in Session column
-            QStringList badges;
-            if (pmd.totalWorking > 0) badges << QString("%1 Working").arg(pmd.totalWorking);
-            if (pmd.totalReady > 0) badges << QString("%1 Ready").arg(pmd.totalReady);
-            if (!badges.isEmpty()) {
-                projItem->setText(3, badges.join("  "));
+            if (pmd.sessions.isEmpty()) {
+                continue;
             }
 
-            QFont projFont = projItem->font(0);
-            projFont.setBold(true);
-            projFont.setPointSize(13);
-            projItem->setFont(0, projFont);
-            projItem->setData(0, Qt::UserRole, pmd.projectPath);
+            for (const SessionInfo& si : pmd.sessions) {
+                QTreeWidgetItem *row = new QTreeWidgetItem(tree);
 
-            for (const ToolSessionSummary& tss : pmd.toolSummaries) {
-                for (const SessionInfo& si : tss.sessions) {
-                    QTreeWidgetItem *sessionItem = new QTreeWidgetItem(projItem);
-                    sessionItem->setText(0, QString()); // blank under project
-                    sessionItem->setText(1, si.terminalName);
-                    sessionItem->setText(2, si.toolName);
-
-                    // Status dot + session detail
-                    QString statusColor;
-                    QString statusText;
-                    if (si.status == SessionStatus::Working) {
-                        statusColor = "#34c759";
-                        statusText = tr("Working");
-                    } else if (si.status == SessionStatus::Ready) {
-                        statusColor = "#007aff";
-                        statusText = tr("Ready");
-                    } else {
-                        statusColor = "#86868b";
-                        statusText = tr("Unknown");
-                    }
-
-                    QString sessionDetail;
-                    if (!si.detailText.isEmpty()) {
-                        sessionDetail = si.detailText;
-                    } else if (!si.sessionPath.isEmpty()) {
-                        sessionDetail = si.sessionPath;
-                    }
-
-                    QString sessionCol = QString("<span style='color: %1;'>&#9679;</span> %2").arg(statusColor, statusText);
-                    if (!sessionDetail.isEmpty()) {
-                        sessionCol += QString(" <span style='color: #86868b; font-size: 11px;'>%1</span>").arg(sessionDetail);
-                    }
-                    if (si.lastActivity.isValid()) {
-                        sessionCol += QString(" <span style='color: #86868b; font-size: 11px;'>%1</span>").arg(si.lastActivity.toString("yyyy-MM-dd HH:mm"));
-                    }
-
-                    QLabel *sessionLabel = new QLabel();
-                    sessionLabel->setText(sessionCol);
-                    sessionLabel->setStyleSheet("QLabel { background: transparent; border: none; }");
-                    tree->setItemWidget(sessionItem, 3, sessionLabel);
-
-                    sessionItem->setData(0, Qt::UserRole, si.projectPath);
-                    sessionItem->setData(1, Qt::UserRole, si.terminalName);
-                    sessionItem->setData(2, Qt::UserRole, si.toolName);
-                    sessionItem->setData(3, Qt::UserRole, si.detailText);
-                    sessionItem->setData(0, Qt::UserRole + 1, si.sessionPath);
-                    sessionItem->setData(0, Qt::UserRole + 2, static_cast<int>(si.status));
+                // Col 0: Project (dedup - only show once)
+                if (pmd.projectName == lastProjectName) {
+                    row->setText(0, QString());
+                } else {
+                    row->setText(0, pmd.projectName);
+                    lastProjectName = pmd.projectName;
                 }
-            }
+                row->setToolTip(0, pmd.projectPath);
 
-            projItem->setExpanded(true);
+                // Col 1: Terminal
+                row->setText(1, si.terminalName);
+                row->setToolTip(1, si.terminalName);
+                if (!si.terminalIconPath.isEmpty()) {
+                    QPixmap terminalPix(si.terminalIconPath);
+                    if (!terminalPix.isNull()) {
+                        row->setIcon(1, QIcon(terminalPix));
+                    }
+                }
+
+                // Col 2: AI Tool with icon
+                row->setText(2, si.toolName);
+                row->setToolTip(2, si.toolName);
+                if (!si.toolIconPath.isEmpty()) {
+                    QPixmap pix(si.toolIconPath);
+                    if (!pix.isNull()) {
+                        row->setIcon(2, QIcon(pix.scaled(16, 16, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+                    }
+                }
+
+                // Col 3: Session ID (from tool config, not PID)
+                QString displaySessionId = si.sessionId;
+                row->setText(3, displaySessionId);
+                row->setToolTip(3, QString("Session: %1\nTool: %2\nPath: %3").arg(si.sessionId, si.toolName, si.projectPath));
+
+                // Col 4: Status
+                QLabel *statusLabel = new QLabel();
+                statusLabel->setAlignment(Qt::AlignCenter);
+                statusLabel->setStyleSheet("QLabel { background: transparent; border: none; padding: 0 4px; }");
+                updateMonitorStatusLabel(statusLabel, si.status);
+                tree->setItemWidget(row, 4, statusLabel);
+
+                // Col 5: Goto button - activate terminal directly
+                QPushButton *gotoBtn = new QPushButton(tr("Goto"));
+                gotoBtn->setMinimumSize(QSize(72, 28));
+                gotoBtn->setCursor(Qt::PointingHandCursor);
+                gotoBtn->setStyleSheet(
+                    "QPushButton { background: #34c759; color: white; font-size: 11px; font-weight: 500; border: none; border-radius: 4px; }"
+                    "QPushButton:hover { background: #2db85e; }");
+                tree->setItemWidget(row, 5, gotoBtn);
+
+                row->setData(0, Qt::UserRole, pmd.projectPath);
+                row->setData(0, Qt::UserRole + 1, si.terminalName);
+                row->setData(0, Qt::UserRole + 2, si.terminalPid);
+                row->setData(0, Qt::UserRole + 3, si.toolName);
+                row->setData(0, Qt::UserRole + 4, si.detailText);
+                row->setData(0, Qt::UserRole + 5, si.sessionPath);
+                row->setData(0, Qt::UserRole + 6, static_cast<int>(si.status));
+                row->setData(0, Qt::UserRole + 7, pmd.projectName);
+                row->setData(0, Qt::UserRole + 8, si.processPid);
+                row->setData(0, Qt::UserRole + 9, si.sessionId);
+                row->setData(0, Qt::UserRole + 10, monitorRowKey(pmd.projectPath, si));
+
+                connect(gotoBtn, &QPushButton::clicked, this, [this, row]() {
+                    qint64 termPid = row->data(0, Qt::UserRole + 2).toLongLong();
+                    activateTerminalWindow(termPid);
+                });
+            }
         }
     }
-
-    connect(tree, &QTreeWidget::itemDoubleClicked, this, [this, tree](QTreeWidgetItem *item, int) {
-        if (!item) return;
-        // Only show detail for session-level items (children)
-        if (item->parent() == nullptr) return;
-
-        SessionInfo si;
-        si.projectPath = item->data(0, Qt::UserRole).toString();
-        si.terminalName = item->data(1, Qt::UserRole).toString();
-        si.toolName = item->data(2, Qt::UserRole).toString();
-        si.detailText = item->data(3, Qt::UserRole).toString();
-        si.sessionPath = item->data(0, Qt::UserRole + 1).toString();
-        si.status = static_cast<SessionStatus>(item->data(0, Qt::UserRole + 2).toInt());
-        if (item->parent()) {
-            si.projectName = item->parent()->text(0);
-        }
-        showSessionDetailDialog(si);
-    });
 
     mainLayout->addWidget(tree, 1);
 
@@ -3212,7 +3288,87 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
         connect(btn, &QPushButton::clicked, this, &MainWindow::refreshMonitorAsync);
     }
 
+    updateMonitorTableColumns(tree);
+    QTimer::singleShot(0, tree, [this, tree]() {
+        updateMonitorTableColumns(tree);
+    });
+
     return container;
+}
+
+void MainWindow::updateMonitorTableColumns(QTreeWidget *tree)
+{
+    if (!tree || tree->columnCount() < 6) {
+        return;
+    }
+
+    const int viewportWidth = tree->viewport()->width();
+    if (viewportWidth <= 0) {
+        return;
+    }
+
+    int projectWidth = qBound(120, viewportWidth / 7, 188);
+    int terminalWidth = viewportWidth < 820 ? 92 : (viewportWidth < 1120 ? 108 : 124);
+    int toolWidth = viewportWidth < 820 ? 128 : (viewportWidth < 1120 ? 148 : 172);
+    int statusWidth = viewportWidth < 820 ? 84 : 96;
+    int actionWidth = viewportWidth < 820 ? 80 : 92;
+    const int minProjectWidth = 112;
+    const int minTerminalWidth = 84;
+    const int minToolWidth = 124;
+    const int minStatusWidth = 80;
+    const int minActionWidth = 78;
+    const int minSessionWidth = 180;
+    const int chromeWidth = 24;
+
+    auto sessionWidth = [&]() {
+        return viewportWidth - (projectWidth + terminalWidth + toolWidth + statusWidth + actionWidth + chromeWidth);
+    };
+
+    auto shrinkToFit = [&](int &value, int minValue) {
+        const int deficit = minSessionWidth - sessionWidth();
+        if (deficit <= 0 || value <= minValue) {
+            return;
+        }
+        const int delta = qMin(deficit, value - minValue);
+        value -= delta;
+    };
+
+    shrinkToFit(projectWidth, minProjectWidth);
+    shrinkToFit(terminalWidth, minTerminalWidth);
+    shrinkToFit(toolWidth, minToolWidth);
+    shrinkToFit(statusWidth, minStatusWidth);
+    shrinkToFit(actionWidth, minActionWidth);
+
+    const int finalSessionWidth = qMax(minSessionWidth, sessionWidth());
+
+    tree->setColumnWidth(0, projectWidth);
+    tree->setColumnWidth(1, terminalWidth);
+    tree->setColumnWidth(2, toolWidth);
+    tree->setColumnWidth(3, finalSessionWidth);
+    tree->setColumnWidth(4, statusWidth);
+    tree->setColumnWidth(5, actionWidth);
+}
+
+void MainWindow::activateTerminalWindow(qint64 pid)
+{
+#ifdef Q_OS_MAC
+    // Use osascript to activate the terminal window by PID
+    QString script = QString(
+        "tell application \"System Events\"\n"
+        "    set procList to every process whose unix id is %1\n"
+        "    if (count of procList) > 0 then\n"
+        "        set frontmost of item 1 of procList to true\n"
+        "    end if\n"
+        "end tell"
+    ).arg(pid);
+
+    QProcess *osascript = new QProcess(this);
+    osascript->start("osascript", QStringList() << "-e" << script);
+    connect(osascript, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            osascript, &QProcess::deleteLater);
+#else
+    Q_UNUSED(pid);
+#endif
 }
 
 void MainWindow::showSessionDetailDialog(const SessionInfo& session)

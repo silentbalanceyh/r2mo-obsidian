@@ -125,7 +125,13 @@ private:
     void refreshMonitorAsync();
     QList<QPair<QString, QString>> collectAllProjectPaths();
     QWidget* buildMonitorView(const QList<ProjectMonitorData>& data);
+    void updateMonitorTableColumns(QTreeWidget *tree);
+    void replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab);
+    bool updateMonitorStatusCells(const QList<ProjectMonitorData>& data);
+    QString monitorRowKey(const QString& projectPath, const SessionInfo& session) const;
+    void updateMonitorStatusLabel(QLabel *label, SessionStatus status) const;
     void showSessionDetailDialog(const SessionInfo& session);
+    void activateTerminalWindow(qint64 pid);
 
     // Toolbar
     QToolBar *m_toolBar;
