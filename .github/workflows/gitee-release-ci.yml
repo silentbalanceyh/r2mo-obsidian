@@ -128,6 +128,7 @@ jobs:
 
           if [ -z "$RELEASE_ID" ]; then
             CREATE_CODE=$(curl -sS -o /tmp/create_release.json -w "%{http_code}" -X POST "${API}/releases" \
+              --connect-timeout 20 --max-time 120 --retry 2 --retry-delay 5 \
               -F "access_token=${GITEE_TOKEN}" \
               -F "tag_name=${RELEASE_TAG}" \
               -F "target_commitish=${COMMIT_SHA}" \
@@ -156,7 +157,9 @@ jobs:
           for f in dist/*; do
             [ -f "$f" ] || continue
             n=$(basename "$f")
+            echo "Uploading ${n}"
             if curl -fsS -X POST "${API}/releases/${RELEASE_ID}/attach_files" \
+              --connect-timeout 20 --max-time 180 --retry 2 --retry-delay 5 \
               -F "access_token=${GITEE_TOKEN}" \
               -F "name=${n}" \
               -F "file=@${f}" >/dev/null; then
