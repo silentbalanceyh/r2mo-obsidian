@@ -1,5 +1,9 @@
 #include "settingsmanager.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+
 SettingsManager* SettingsManager::instance()
 {
     static SettingsManager manager;
@@ -60,6 +64,76 @@ QString SettingsManager::lastVaultPath() const
 void SettingsManager::setLastVaultPath(const QString& path)
 {
     m_settings.setValue("lastVaultPath", path);
+}
+
+QList<SpecialMonitorSource> SettingsManager::specialMonitorSources() const
+{
+    QList<SpecialMonitorSource> sources;
+    const QByteArray raw = m_settings.value("specialMonitorSources").toByteArray();
+    if (raw.isEmpty()) {
+        return sources;
+    }
+
+    QJsonParseError error;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw, &error);
+    if (error.error != QJsonParseError::NoError || !doc.isArray()) {
+        return sources;
+    }
+
+    const QJsonArray array = doc.array();
+    for (const QJsonValue& value : array) {
+        const QJsonObject object = value.toObject();
+        SpecialMonitorSource source;
+        source.providerName = object.value("providerName").toString();
+        source.baseUrl = object.value("baseUrl").toString();
+        source.tokenKey = object.value("tokenKey").toString();
+        if (source.baseUrl.trimmed().isEmpty() || source.tokenKey.trimmed().isEmpty()) {
+            continue;
+        }
+        if (source.providerName.trimmed().isEmpty()) {
+            source.providerName = SpecialMonitorFetcher::defaultProviderName(source.baseUrl);
+        }
+        sources.append(source);
+    }
+
+    return sources;
+}
+
+void SettingsManager::setSpecialMonitorSources(const QList<SpecialMonitorSource>& sources)
+{
+    QJsonArray array;
+    for (const SpecialMonitorSource& source : sources) {
+        if (source.baseUrl.trimmed().isEmpty() || source.tokenKey.trimmed().isEmpty()) {
+            continue;
+        }
+        QJsonObject object;
+        object.insert("providerName", source.providerName);
+        object.insert("baseUrl", SpecialMonitorFetcher::normalizeBaseUrl(source.baseUrl));
+        object.insert("tokenKey", source.tokenKey.trimmed());
+        array.append(object);
+    }
+    m_settings.setValue("specialMonitorSources", QJsonDocument(array).toJson(QJsonDocument::Compact));
+    m_settings.sync();
+}
+
+QByteArray SettingsManager::monitorBoardHeaderState() const
+{
+    return m_settings.value("monitorBoardHeaderState.v2").toByteArray();
+}
+
+void SettingsManager::setMonitorBoardHeaderState(const QByteArray& state)
+{
+    m_settings.setValue("monitorBoardHeaderState.v2", state);
+}
+
+QByteArray SettingsManager::specialMonitorHeaderState() const
+{
+    return m_settings.value("specialMonitorHeaderState.v3").toByteArray();
+}
+
+void SettingsManager::setSpecialMonitorHeaderState(const QByteArray& state)
+{
+    m_settings.setValue("specialMonitorHeaderState.v3", state);
 }
 
 void SettingsManager::sync()

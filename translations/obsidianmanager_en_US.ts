@@ -215,5 +215,161 @@
         <source>📁 Parent Project    📂 Sub-project</source>
         <translation>📁 Parent Project    📂 Sub-project</translation>
     </message>
+    <message>
+        <source>Refreshing...</source>
+        <translation>Refreshing...</translation>
+    </message>
+    <message>
+        <source>Not loaded</source>
+        <translation>Not loaded</translation>
+    </message>
+    <message>
+        <source>Unknown</source>
+        <translation>Unknown</translation>
+    </message>
+    <message>
+        <source>No token sources</source>
+        <translation>No token sources</translation>
+    </message>
+    <message>
+        <source>%1 token(s)</source>
+        <translation>%1 token(s)</translation>
+    </message>
+    <message>
+        <source>🔑 ⚙️ Special Billing</source>
+        <translation>🔑 ⚙️ Special Billing</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>Idle</translation>
+    </message>
+    <message>
+        <source>Provider</source>
+        <translation>Provider</translation>
+    </message>
+    <message>
+        <source>Token</source>
+        <translation>Token</translation>
+    </message>
+    <message>
+        <source>🔑 Account</source>
+        <translation>🔑 Account</translation>
+    </message>
+    <message>
+        <source>⚙️ Type</source>
+        <translation>⚙️ Type</translation>
+    </message>
+    <message>
+        <source>🕒 Updated</source>
+        <translation>🕒 Updated</translation>
+    </message>
+    <message>
+        <source>Add Token Source</source>
+        <translation>Add Token Source</translation>
+    </message>
+    <message>
+        <source>Edit Token Source</source>
+        <translation>Edit Token Source</translation>
+    </message>
+    <message>
+        <source>Enter token key</source>
+        <translation>Enter token key</translation>
+    </message>
+    <message>
+        <source>Token Key</source>
+        <translation>Token Key</translation>
+    </message>
+    <message>
+        <source>Token key cannot be empty.</source>
+        <translation>Token key cannot be empty.</translation>
+    </message>
+    <message>
+        <source>Duplicate Token Source</source>
+        <translation>Duplicate Token Source</translation>
+    </message>
+    <message>
+        <source>This provider and token already exist.</source>
+        <translation>This provider and token already exist.</translation>
+    </message>
+    <message>
+        <source>OK</source>
+        <translation>OK</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Cancel</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Add</translation>
+    </message>
+    <message>
+        <source>Edit</source>
+        <translation>Edit</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Remove</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation>Refresh</translation>
+    </message>
+    <message>
+        <source>Monitor Board</source>
+        <translation>Monitor Board</translation>
+    </message>
+    <message>
+        <source>Working</source>
+        <translation>Working</translation>
+    </message>
+    <message>
+        <source>Ready</source>
+        <translation>Ready</translation>
+    </message>
+    <message>
+        <source>Project</source>
+        <translation>Project</translation>
+    </message>
+    <message>
+        <source>Terminal</source>
+        <translation>Terminal</translation>
+    </message>
+    <message>
+        <source>AI Tool</source>
+        <translation>AI Tool</translation>
+    </message>
+    <message>
+        <source>Session</source>
+        <translation>Session</translation>
+    </message>
+    <message>
+        <source>Action</source>
+        <translation>Action</translation>
+    </message>
+    <message>
+        <source>No active AI sessions detected.</source>
+        <translation>No active AI sessions detected.</translation>
+    </message>
+    <message>
+        <source>➕ Today Added</source>
+        <translation>➕ Today Added</translation>
+    </message>
+    <message>
+        <source>🔥 Today Used</source>
+        <translation>🔥 Today Used</translation>
+    </message>
+    <message>
+        <source>🎯 Remain</source>
+        <translation>🎯 Remain</translation>
+    </message>
+    <message>
+        <source>📈 Usage Count</source>
+        <translation>📈 Usage Count</translation>
+    </message>
+    <message>
+        <source>💎 Opus</source>
+        <translation>💎 Opus</translation>
+    </message>
 </context>
 </TS>

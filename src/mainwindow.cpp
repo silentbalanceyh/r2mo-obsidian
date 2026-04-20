@@ -13,6 +13,7 @@
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
+#include <QApplication>
 #include <QMessageBox>
 #include <QFileDialog>
 #include <QInputDialog>
@@ -38,22 +39,49 @@
 #include <QDir>
 #include <QProcess>
 #include <QButtonGroup>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTabWidget>
 #include <QWheelEvent>
 #include <QMouseEvent>
 #include <QHeaderView>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QSpacerItem>
 #include <QStatusBar>
 #include <QPixmap>
 #include <QToolButton>
 #include <QProgressBar>
+#include <QClipboard>
 #include <QtConcurrent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegularExpression>
 #include <QSignalBlocker>
+
+namespace {
+struct SpecialMonitorProviderOption {
+    QString label;
+    QString baseUrl;
+};
+
+QList<SpecialMonitorProviderOption> specialMonitorProviders()
+{
+    return {
+        {QStringLiteral("💻 PP Coding"), QStringLiteral("https://code.ppchat.vip")}
+    };
+}
+
+QString specialMonitorSourceKey(const QString& baseUrl, const QString& tokenKey)
+{
+    return QStringLiteral("%1|%2")
+        .arg(SpecialMonitorFetcher::normalizeBaseUrl(baseUrl),
+             tokenKey.trimmed());
+}
+}
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
@@ -113,6 +141,14 @@ MainWindow::MainWindow(QWidget *parent)
       , m_monitorRefreshing(false)
       , m_monitorProgressLabel(nullptr)
       , m_monitorProgressStep(0)
+      , m_specialMonitorPanel(nullptr)
+      , m_specialMonitorTable(nullptr)
+      , m_specialMonitorScanWatcher(nullptr)
+      , m_specialMonitorRefreshing(false)
+      , m_specialMonitorStatusLabel(nullptr)
+      , m_monitorVerticalSplitter(nullptr)
+      , m_specialMonitorPanelStretchId(0)
+      , m_specialMonitorPanelUserResized(false)
      , m_vaultModel(nullptr)
      , m_settingsManager(nullptr)
      , m_vaultValidator(nullptr)
@@ -517,6 +553,8 @@ void MainWindow::onLanguageButtonClicked(int id)
     QString langCode = (id == 0) ? "zh_CN" : "en_US";
     TranslationManager::instance()->switchLanguage(langCode);
     m_settingsManager->setLanguage(langCode);
+    invalidateMonitorView(m_monitorTabContent != nullptr);
+    updateSpecialMonitorPanelSizing();
 }
 
 void MainWindow::setupCentralWidget()
@@ -883,6 +921,14 @@ void MainWindow::setupConnections()
                 replaceMonitorContent(newWidget, true);
             }
             m_monitorRefreshing = false;
+        }
+    });
+
+    m_specialMonitorScanWatcher = new QFutureWatcher<QList<SpecialMonitorSnapshot>>(this);
+    connect(m_specialMonitorScanWatcher, &QFutureWatcher<QList<SpecialMonitorSnapshot>>::finished, this, [this]() {
+        if (m_specialMonitorRefreshing) {
+            updateSpecialMonitorTable(m_specialMonitorScanWatcher->result());
+            m_specialMonitorRefreshing = false;
         }
     });
     
@@ -1540,11 +1586,476 @@ void MainWindow::onSettings()
 {
     QString path = QInputDialog::getText(this, tr("Obsidian App Path"),
                                          tr("Enter Obsidian.app path:"),
-                                         QLineEdit::Normal, 
+                                         QLineEdit::Normal,
                                          m_settingsManager->obsidianAppPath());
     if (!path.isEmpty()) {
         m_settingsManager->setObsidianAppPath(path);
     }
+}
+
+void MainWindow::refreshSpecialMonitorAsync()
+{
+    if (m_specialMonitorRefreshing) {
+        return;
+    }
+
+    const QList<SpecialMonitorSource> sources = m_settingsManager->specialMonitorSources();
+    if (sources.isEmpty()) {
+        updateSpecialMonitorTable({});
+        return;
+    }
+
+    m_specialMonitorRefreshing = true;
+    m_specialMonitorStatusLabel->setText(tr("Refreshing..."));
+    QFuture<QList<SpecialMonitorSnapshot>> future = QtConcurrent::run([sources]() {
+        SpecialMonitorFetcher fetcher;
+        return fetcher.fetchSnapshots(sources);
+    });
+    m_specialMonitorScanWatcher->setFuture(future);
+}
+
+void MainWindow::updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& snapshots)
+{
+    if (!m_specialMonitorTable) {
+        return;
+    }
+
+    const QList<SpecialMonitorSource> sources = m_settingsManager->specialMonitorSources();
+    m_specialMonitorTable->setRowCount(sources.size());
+    auto makeItem = [](const QString& text, Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignVCenter) {
+        QTableWidgetItem *item = new QTableWidgetItem(text);
+        item->setTextAlignment(alignment);
+        return item;
+    };
+
+    for (int row = 0; row < sources.size(); ++row) {
+        SpecialMonitorSnapshot snapshot;
+        if (row < snapshots.size()) {
+            snapshot = snapshots.at(row);
+        } else {
+            snapshot.source = sources.at(row);
+            snapshot.errorMessage = tr("Not loaded");
+        }
+        const QString provider = snapshot.source.providerName.isEmpty()
+            ? SpecialMonitorFetcher::defaultProviderName(snapshot.source.baseUrl)
+            : snapshot.source.providerName;
+        const QString tokenLabel = snapshot.source.tokenKey;
+        const QString typeLabel = snapshot.packageType.isEmpty() ? tr("Unknown") : snapshot.packageType;
+        const QString accountLabel = snapshot.accountName.isEmpty() ? tr("Unknown") : snapshot.accountName;
+
+        m_specialMonitorTable->setItem(row, 0, makeItem(provider));
+        QTableWidgetItem *tokenItem = makeItem(QString());
+        tokenItem->setToolTip(QString());
+        m_specialMonitorTable->setItem(row, 1, tokenItem);
+        QWidget *tokenWidget = new QWidget(m_specialMonitorTable);
+        QHBoxLayout *tokenLayout = new QHBoxLayout(tokenWidget);
+        tokenLayout->setContentsMargins(8, 0, 8, 0);
+        tokenLayout->setSpacing(6);
+        QToolButton *copyBtn = new QToolButton(tokenWidget);
+        copyBtn->setText(tr("复制"));
+        copyBtn->setAutoRaise(true);
+        copyBtn->setCursor(Qt::PointingHandCursor);
+        copyBtn->setToolTip(QString());
+        copyBtn->setFixedWidth(34);
+        QLabel *tokenLabelWidget = new QLabel(tokenWidget);
+        tokenLabelWidget->setObjectName("specialMonitorTokenLabel");
+        tokenLabelWidget->setProperty("fullToken", tokenLabel);
+        tokenLabelWidget->setToolTip(QString());
+        tokenLabelWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        tokenLabelWidget->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        tokenLayout->addWidget(copyBtn, 0);
+        tokenLayout->addWidget(tokenLabelWidget, 1);
+        connect(copyBtn, &QToolButton::clicked, this, [this, tokenLabel]() {
+            if (QClipboard *clipboard = QApplication::clipboard()) {
+                clipboard->setText(tokenLabel, QClipboard::Clipboard);
+#if defined(Q_OS_LINUX)
+                clipboard->setText(tokenLabel, QClipboard::Selection);
+#endif
+                statusBar()->showMessage(tr("Token copied"), 2000);
+            }
+        });
+        m_specialMonitorTable->setCellWidget(row, 1, tokenWidget);
+        m_specialMonitorTable->setItem(row, 2, makeItem(accountLabel));
+        m_specialMonitorTable->setItem(row, 3, makeItem(typeLabel));
+        m_specialMonitorTable->setItem(row, 4, makeItem(QString::number(snapshot.todayAddedQuota), Qt::AlignCenter));
+        m_specialMonitorTable->setItem(row, 5, makeItem(QString::number(snapshot.todayUsedQuota), Qt::AlignCenter));
+        m_specialMonitorTable->setItem(row, 6, makeItem(QString::number(snapshot.remainQuota), Qt::AlignCenter));
+        m_specialMonitorTable->setItem(row, 7, makeItem(QString::number(snapshot.todayUsageCount), Qt::AlignCenter));
+        m_specialMonitorTable->setItem(row, 8, makeItem(QString::number(snapshot.todayOpusUsage), Qt::AlignCenter));
+        m_specialMonitorTable->setItem(row, 9, makeItem(snapshot.updatedAt, Qt::AlignCenter));
+    }
+
+    m_specialMonitorStatusLabel->setText(
+        sources.isEmpty() ? tr("No token sources") : tr("%1 token(s)").arg(sources.size()));
+
+    updateSpecialMonitorTableColumns();
+}
+
+void MainWindow::updateSpecialMonitorTableColumns()
+{
+    if (!m_specialMonitorTable || m_specialMonitorTable->columnCount() < 10) {
+        return;
+    }
+
+    const int viewportWidth = m_specialMonitorTable->viewport()->width();
+    if (viewportWidth <= 0) {
+        return;
+    }
+
+    int providerWidth = qBound(120, viewportWidth / 10, 180);
+    int tokenWidth = qBound(180, viewportWidth / 8, 280);
+    int accountWidth = qBound(150, viewportWidth / 9, 220);
+    int typeWidth = qBound(110, viewportWidth / 12, 150);
+    int addedWidth = qBound(110, viewportWidth / 13, 150);
+    int usedWidth = qBound(110, viewportWidth / 13, 150);
+    int remainWidth = qBound(110, viewportWidth / 13, 150);
+    int usageWidth = qBound(110, viewportWidth / 13, 150);
+    int opusWidth = qBound(128, viewportWidth / 12, 176);
+    int updatedWidth = qBound(150, viewportWidth / 9, 220);
+    const int chromeWidth = 8;
+
+    auto totalWidth = [&]() {
+        return providerWidth + tokenWidth + accountWidth + typeWidth + addedWidth +
+            usedWidth + remainWidth + usageWidth + opusWidth + updatedWidth + chromeWidth;
+    };
+
+    const int extraWidth = viewportWidth - totalWidth();
+    if (extraWidth > 0) {
+        tokenWidth += extraWidth / 3;
+        updatedWidth += extraWidth / 4;
+        accountWidth += extraWidth / 6;
+        providerWidth += extraWidth - (extraWidth / 3) - (extraWidth / 4) - (extraWidth / 6);
+    } else if (extraWidth < 0) {
+        int deficit = -extraWidth;
+        auto shrink = [&deficit](int &value, int minValue) {
+            if (deficit <= 0 || value <= minValue) {
+                return;
+            }
+            const int delta = qMin(deficit, value - minValue);
+            value -= delta;
+            deficit -= delta;
+        };
+
+        shrink(tokenWidth, 160);
+        shrink(updatedWidth, 136);
+        shrink(accountWidth, 132);
+        shrink(providerWidth, 104);
+        shrink(typeWidth, 96);
+        shrink(addedWidth, 96);
+        shrink(usedWidth, 96);
+        shrink(remainWidth, 96);
+        shrink(usageWidth, 96);
+        shrink(opusWidth, 120);
+
+        if (deficit > 0) {
+            tokenWidth = qMax(128, tokenWidth - deficit);
+        }
+    }
+
+    m_specialMonitorTable->setColumnWidth(0, providerWidth);
+    m_specialMonitorTable->setColumnWidth(1, tokenWidth);
+    m_specialMonitorTable->setColumnWidth(2, accountWidth);
+    m_specialMonitorTable->setColumnWidth(3, typeWidth);
+    m_specialMonitorTable->setColumnWidth(4, addedWidth);
+    m_specialMonitorTable->setColumnWidth(5, usedWidth);
+    m_specialMonitorTable->setColumnWidth(6, remainWidth);
+    m_specialMonitorTable->setColumnWidth(7, usageWidth);
+    m_specialMonitorTable->setColumnWidth(8, opusWidth);
+    m_specialMonitorTable->setColumnWidth(9, updatedWidth);
+
+    for (int row = 0; row < m_specialMonitorTable->rowCount(); ++row) {
+        QWidget *tokenWidget = m_specialMonitorTable->cellWidget(row, 1);
+        if (!tokenWidget) {
+            continue;
+        }
+        QLabel *tokenLabelWidget = tokenWidget->findChild<QLabel*>("specialMonitorTokenLabel");
+        if (!tokenLabelWidget) {
+            continue;
+        }
+        const QString fullToken = tokenLabelWidget->property("fullToken").toString();
+        const int labelWidth = qMax(48, m_specialMonitorTable->columnWidth(1) - 58);
+        const QString elided = tokenLabelWidget->fontMetrics().elidedText(fullToken, Qt::ElideRight, labelWidth);
+        tokenLabelWidget->setText(elided);
+    }
+}
+
+QWidget* MainWindow::buildSpecialMonitorPanel()
+{
+    QWidget *panel = new QWidget();
+    panel->setStyleSheet("QWidget { background: #fafafa; border-top: 1px solid #e0e0e0; }");
+    QVBoxLayout *layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(12, 10, 12, 10);
+    layout->setSpacing(8);
+
+    QHBoxLayout *headerLayout = new QHBoxLayout();
+    QLabel *title = new QLabel(tr("🔑 ⚙️ Special Billing"));
+    title->setStyleSheet("QLabel { font-size: 15px; font-weight: 600; color: #333; }");
+    headerLayout->addWidget(title);
+
+    m_specialMonitorStatusLabel = new QLabel(tr("Idle"));
+    m_specialMonitorStatusLabel->setStyleSheet("QLabel { color: #86868b; font-size: 14px; }");
+    headerLayout->addWidget(m_specialMonitorStatusLabel);
+    headerLayout->addStretch();
+
+    QPushButton *addBtn = new QPushButton(tr("Add"));
+    QPushButton *editBtn = new QPushButton(tr("Edit"));
+    QPushButton *removeBtn = new QPushButton(tr("Remove"));
+    QPushButton *refreshBtn = new QPushButton(tr("Refresh"));
+    const QString actionButtonStyle =
+        "QPushButton { background: #f5f5f7; color: #4a4a4a; font-size: 11px; border: 1px solid #d7d7dc; border-radius: 4px; padding: 2px 10px; min-width: 80px; min-height: 24px; }"
+        "QPushButton:hover { background: #ececf1; color: #1d1d1f; }";
+    const QString dangerButtonStyle =
+        "QPushButton { background: #fff1f0; color: #d93025; font-size: 11px; border: 1px solid #f1b7b3; border-radius: 4px; padding: 2px 10px; min-width: 80px; min-height: 24px; }"
+        "QPushButton:hover { background: #ffe3e0; color: #b3261e; }";
+    addBtn->setStyleSheet(actionButtonStyle);
+    editBtn->setStyleSheet(actionButtonStyle);
+    removeBtn->setStyleSheet(dangerButtonStyle);
+    refreshBtn->setStyleSheet(actionButtonStyle);
+    connect(addBtn, &QPushButton::clicked, this, &MainWindow::addSpecialMonitorSource);
+    connect(editBtn, &QPushButton::clicked, this, &MainWindow::editSpecialMonitorSource);
+    connect(removeBtn, &QPushButton::clicked, this, &MainWindow::removeSpecialMonitorSource);
+    connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::refreshSpecialMonitorAsync);
+    headerLayout->addWidget(addBtn);
+    headerLayout->addWidget(editBtn);
+    headerLayout->addWidget(removeBtn);
+    headerLayout->addWidget(refreshBtn);
+    layout->addLayout(headerLayout);
+
+    m_specialMonitorTable = new QTableWidget(0, 10, panel);
+    m_specialMonitorTable->setHorizontalHeaderLabels(QStringList()
+        << tr("Provider")
+        << tr("Token")
+        << tr("🔑 Account")
+        << tr("⚙️ Type")
+        << tr("➕ Today Added")
+        << tr("🔥 Today Used")
+        << tr("🎯 Remain")
+        << tr("📈 Usage Count")
+        << tr("💎 Opus Count")
+        << tr("🕒 Updated"));
+    m_specialMonitorTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_specialMonitorTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_specialMonitorTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_specialMonitorTable->setAlternatingRowColors(true);
+    m_specialMonitorTable->setShowGrid(false);
+    m_specialMonitorTable->setFrameShape(QFrame::NoFrame);
+    m_specialMonitorTable->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_specialMonitorTable->setTextElideMode(Qt::ElideRight);
+    m_specialMonitorTable->horizontalHeader()->setStretchLastSection(false);
+    m_specialMonitorTable->horizontalHeader()->setSectionsMovable(false);
+    m_specialMonitorTable->horizontalHeader()->setSectionsClickable(true);
+    for (int col = 0; col < m_specialMonitorTable->columnCount(); ++col) {
+        m_specialMonitorTable->horizontalHeader()->setSectionResizeMode(col, QHeaderView::Interactive);
+    }
+    m_specialMonitorTable->verticalHeader()->setVisible(false);
+    m_specialMonitorTable->verticalHeader()->setDefaultSectionSize(38);
+    m_specialMonitorTable->setMinimumHeight(220);
+    m_specialMonitorTable->horizontalHeader()->setStretchLastSection(false);
+    m_specialMonitorTable->setStyleSheet(
+        "QTableWidget { background: white; border: none; gridline-color: transparent; font-size: 14px; outline: none; }"
+        "QTableWidget::item { padding: 8px 10px; border-bottom: 1px solid #f5f5f7; }"
+        "QTableWidget::item:selected { background: #e8f4fd; color: #1d1d1f; }"
+        "QHeaderView::section { background: #f5f5f7; color: #86868b; font-size: 14px; font-weight: 600; min-height: 36px; padding: 6px 8px; border: none; border-bottom: 1px solid #e0e0e0; }");
+    m_specialMonitorTable->viewport()->installEventFilter(this);
+    QTimer::singleShot(0, m_specialMonitorTable, [this]() {
+        if (!m_specialMonitorTable) {
+            return;
+        }
+        updateSpecialMonitorTableColumns();
+        const QByteArray headerState = m_settingsManager->specialMonitorHeaderState();
+        if (!headerState.isEmpty()) {
+            m_specialMonitorTable->horizontalHeader()->restoreState(headerState);
+        }
+        updateSpecialMonitorTableColumns();
+    });
+    connect(m_specialMonitorTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this]() {
+        if (!m_specialMonitorTable) {
+            return;
+        }
+        m_settingsManager->setSpecialMonitorHeaderState(m_specialMonitorTable->horizontalHeader()->saveState());
+        m_settingsManager->sync();
+    });
+    layout->addWidget(m_specialMonitorTable, 1);
+
+    updateSpecialMonitorTable({});
+
+    return panel;
+}
+
+void MainWindow::updateSpecialMonitorPanelSizing()
+{
+    if (!m_monitorVerticalSplitter || !m_specialMonitorPanel) {
+        return;
+    }
+
+    const int totalHeight = qMax(420, m_monitorVerticalSplitter->size().height());
+    const int minPanelHeight = qMax(180, totalHeight / 5);
+    const int preferredPanelHeight = qMax(minPanelHeight, (totalHeight * 2) / 5);
+    const int maxPanelHeight = qMax(preferredPanelHeight, totalHeight / 2);
+    const QList<int> currentSizes = m_monitorVerticalSplitter->sizes();
+    const int currentPanelHeight = currentSizes.size() > 1 ? currentSizes.at(1) : 0;
+    const int targetPanelHeight = (!m_specialMonitorPanelUserResized || currentPanelHeight <= 0)
+        ? preferredPanelHeight
+        : qBound(minPanelHeight, currentPanelHeight, maxPanelHeight);
+    const int topHeight = qMax(120, totalHeight - targetPanelHeight);
+
+    m_specialMonitorPanel->setMinimumHeight(minPanelHeight);
+    m_specialMonitorPanel->setMaximumHeight(maxPanelHeight);
+    m_monitorVerticalSplitter->setSizes(QList<int>() << topHeight << targetPanelHeight);
+    m_monitorVerticalSplitter->setCollapsible(0, false);
+    m_monitorVerticalSplitter->setCollapsible(1, false);
+}
+
+void MainWindow::addSpecialMonitorSource()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Add Token Source"));
+    dialog.resize(720, 200);
+    QVBoxLayout *dialogLayout = new QVBoxLayout(&dialog);
+    QFormLayout *formLayout = new QFormLayout();
+    formLayout->setHorizontalSpacing(16);
+    formLayout->setVerticalSpacing(12);
+
+    QComboBox *providerCombo = new QComboBox(&dialog);
+    const QList<SpecialMonitorProviderOption> providers = specialMonitorProviders();
+    for (const SpecialMonitorProviderOption& provider : providers) {
+        providerCombo->addItem(provider.label, provider.baseUrl);
+    }
+    providerCombo->setMinimumWidth(320);
+
+    QLineEdit *tokenEdit = new QLineEdit(&dialog);
+    tokenEdit->setPlaceholderText(tr("Enter token key"));
+    tokenEdit->setMinimumWidth(520);
+    tokenEdit->setClearButtonEnabled(true);
+    formLayout->addRow(tr("Provider"), providerCombo);
+    formLayout->addRow(tr("Token Key"), tokenEdit);
+    dialogLayout->addLayout(formLayout);
+
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    dialogLayout->addWidget(buttonBox);
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QString baseUrl = providerCombo->currentData().toString();
+    const QString tokenKey = tokenEdit->text().trimmed();
+    if (tokenKey.isEmpty()) {
+        QMessageBox::warning(this, tr("Warning"), tr("Token key cannot be empty."));
+        return;
+    }
+
+    QList<SpecialMonitorSource> sources = m_settingsManager->specialMonitorSources();
+    const QString newKey = specialMonitorSourceKey(baseUrl, tokenKey);
+    for (const SpecialMonitorSource& existing : sources) {
+        if (specialMonitorSourceKey(existing.baseUrl, existing.tokenKey) == newKey) {
+            QMessageBox::warning(this, tr("Duplicate Token Source"),
+                                 tr("This provider and token already exist."));
+            return;
+        }
+    }
+
+    SpecialMonitorSource source;
+    source.baseUrl = baseUrl;
+    source.tokenKey = tokenKey;
+    source.providerName = providerCombo->currentText();
+    sources.append(source);
+    m_settingsManager->setSpecialMonitorSources(sources);
+    refreshSpecialMonitorAsync();
+}
+
+void MainWindow::editSpecialMonitorSource()
+{
+    if (!m_specialMonitorTable || m_specialMonitorTable->currentRow() < 0) {
+        return;
+    }
+    const int row = m_specialMonitorTable->currentRow();
+    QList<SpecialMonitorSource> sources = m_settingsManager->specialMonitorSources();
+    if (row >= sources.size()) {
+        return;
+    }
+
+    SpecialMonitorSource source = sources.at(row);
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Edit Token Source"));
+    dialog.resize(720, 200);
+    QVBoxLayout *dialogLayout = new QVBoxLayout(&dialog);
+    QFormLayout *formLayout = new QFormLayout();
+    formLayout->setHorizontalSpacing(16);
+    formLayout->setVerticalSpacing(12);
+
+    QComboBox *providerCombo = new QComboBox(&dialog);
+    const QList<SpecialMonitorProviderOption> providers = specialMonitorProviders();
+    int selectedIndex = 0;
+    for (int i = 0; i < providers.size(); ++i) {
+        providerCombo->addItem(providers.at(i).label, providers.at(i).baseUrl);
+        if (SpecialMonitorFetcher::normalizeBaseUrl(providers.at(i).baseUrl) ==
+            SpecialMonitorFetcher::normalizeBaseUrl(source.baseUrl)) {
+            selectedIndex = i;
+        }
+    }
+    providerCombo->setCurrentIndex(selectedIndex);
+    providerCombo->setMinimumWidth(320);
+
+    QLineEdit *tokenEdit = new QLineEdit(source.tokenKey, &dialog);
+    tokenEdit->setPlaceholderText(tr("Enter token key"));
+    tokenEdit->setMinimumWidth(520);
+    tokenEdit->setClearButtonEnabled(true);
+    formLayout->addRow(tr("Provider"), providerCombo);
+    formLayout->addRow(tr("Token Key"), tokenEdit);
+    dialogLayout->addLayout(formLayout);
+
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    dialogLayout->addWidget(buttonBox);
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QString baseUrl = providerCombo->currentData().toString();
+    const QString tokenKey = tokenEdit->text().trimmed();
+    if (tokenKey.isEmpty()) {
+        QMessageBox::warning(this, tr("Warning"), tr("Token key cannot be empty."));
+        return;
+    }
+
+    const QString updatedKey = specialMonitorSourceKey(baseUrl, tokenKey);
+    for (int i = 0; i < sources.size(); ++i) {
+        if (i == row) {
+            continue;
+        }
+        if (specialMonitorSourceKey(sources.at(i).baseUrl, sources.at(i).tokenKey) == updatedKey) {
+            QMessageBox::warning(this, tr("Duplicate Token Source"),
+                                 tr("This provider and token already exist."));
+            return;
+        }
+    }
+
+    source.baseUrl = baseUrl;
+    source.tokenKey = tokenKey;
+    source.providerName = providerCombo->currentText();
+    sources[row] = source;
+    m_settingsManager->setSpecialMonitorSources(sources);
+    refreshSpecialMonitorAsync();
+}
+
+void MainWindow::removeSpecialMonitorSource()
+{
+    if (!m_specialMonitorTable || m_specialMonitorTable->currentRow() < 0) {
+        return;
+    }
+    const int row = m_specialMonitorTable->currentRow();
+    QList<SpecialMonitorSource> sources = m_settingsManager->specialMonitorSources();
+    if (row >= sources.size()) {
+        return;
+    }
+    sources.removeAt(row);
+    m_settingsManager->setSpecialMonitorSources(sources);
+    refreshSpecialMonitorAsync();
 }
 
 void MainWindow::updatePreviewPane(const QString& name, const QString& path)
@@ -2885,6 +3396,11 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         }
     }
 
+    if (m_specialMonitorTable && watched == m_specialMonitorTable->viewport() &&
+        (event->type() == QEvent::Resize || event->type() == QEvent::Show || event->type() == QEvent::LayoutRequest)) {
+        updateSpecialMonitorTableColumns();
+    }
+
     // Handle wheel events for graph view zoom
     if (watched == m_graphView && event->type() == QEvent::Wheel) {
         QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
@@ -3313,6 +3829,9 @@ void MainWindow::replaceMonitorContent(QWidget *newContent, bool preserveCurrent
     if (preserveCurrentTab && wasCurrent) {
         m_mainTabWidget->setCurrentIndex(newIdx);
     }
+    QTimer::singleShot(0, this, [this]() {
+        updateSpecialMonitorPanelSizing();
+    });
 }
 
 QString MainWindow::monitorRowKey(const QString& projectPath, const SessionInfo& session) const
@@ -3451,6 +3970,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
     tree->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     tree->header()->setStretchLastSection(false);
     tree->header()->setMinimumSectionSize(72);
+    tree->header()->setSectionsClickable(true);
     tree->header()->setSectionResizeMode(0, QHeaderView::Fixed);
     tree->header()->setSectionResizeMode(1, QHeaderView::Fixed);
     tree->header()->setSectionResizeMode(2, QHeaderView::Fixed);
@@ -3552,7 +4072,21 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
         }
     }
 
-    mainLayout->addWidget(tree, 1);
+    m_monitorVerticalSplitter = new QSplitter(Qt::Vertical, container);
+    m_monitorVerticalSplitter->setChildrenCollapsible(false);
+    m_monitorVerticalSplitter->setHandleWidth(10);
+    m_monitorVerticalSplitter->setStyleSheet(
+        "QSplitter::handle:vertical { background: #e8e8ed; height: 10px; margin: 2px 0; border-radius: 4px; }"
+        "QSplitter::handle:vertical:hover { background: #d0d0d7; }");
+    m_specialMonitorPanelUserResized = false;
+
+    m_monitorVerticalSplitter->addWidget(tree);
+    m_specialMonitorPanel = buildSpecialMonitorPanel();
+    m_monitorVerticalSplitter->addWidget(m_specialMonitorPanel);
+    connect(m_monitorVerticalSplitter, &QSplitter::splitterMoved, this, [this]() {
+        m_specialMonitorPanelUserResized = true;
+    });
+    mainLayout->addWidget(m_monitorVerticalSplitter, 1);
 
     QPushButton *btn = container->findChild<QPushButton*>("", Qt::FindDirectChildrenOnly);
     if (btn && btn->property("isMonitorRefreshBtn").toBool()) {
@@ -3562,6 +4096,25 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
     updateMonitorTableColumns(tree);
     QTimer::singleShot(0, tree, [this, tree]() {
         updateMonitorTableColumns(tree);
+    });
+    QTimer::singleShot(0, tree, [this, tree]() {
+        for (int col = 0; col < tree->columnCount(); ++col) {
+            tree->header()->setSectionResizeMode(col, QHeaderView::Interactive);
+        }
+        const QByteArray headerState = m_settingsManager->monitorBoardHeaderState();
+        if (!headerState.isEmpty()) {
+            tree->header()->restoreState(headerState);
+        }
+        connect(tree->header(), &QHeaderView::sectionResized, this, [this, tree]() {
+            m_settingsManager->setMonitorBoardHeaderState(tree->header()->saveState());
+            m_settingsManager->sync();
+        });
+    });
+    QTimer::singleShot(0, this, [this]() {
+        updateSpecialMonitorPanelSizing();
+    });
+    QTimer::singleShot(0, this, [this]() {
+        refreshSpecialMonitorAsync();
     });
 
     return container;
@@ -3578,18 +4131,18 @@ void MainWindow::updateMonitorTableColumns(QTreeWidget *tree)
         return;
     }
 
-    int projectWidth = qBound(120, viewportWidth / 7, 188);
-    int terminalWidth = viewportWidth < 820 ? 92 : (viewportWidth < 1120 ? 108 : 124);
-    int toolWidth = viewportWidth < 820 ? 128 : (viewportWidth < 1120 ? 148 : 172);
-    int statusWidth = viewportWidth < 820 ? 84 : 96;
-    int actionWidth = viewportWidth < 820 ? 80 : 92;
+    int projectWidth = qBound(150, viewportWidth / 8, 240);
+    int terminalWidth = viewportWidth < 820 ? 108 : (viewportWidth < 1120 ? 124 : 144);
+    int toolWidth = viewportWidth < 820 ? 136 : (viewportWidth < 1120 ? 168 : 196);
+    int statusWidth = viewportWidth < 820 ? 104 : 124;
+    int actionWidth = viewportWidth < 820 ? 104 : 128;
     const int minProjectWidth = 112;
-    const int minTerminalWidth = 84;
-    const int minToolWidth = 124;
-    const int minStatusWidth = 80;
-    const int minActionWidth = 78;
+    const int minTerminalWidth = 96;
+    const int minToolWidth = 128;
+    const int minStatusWidth = 96;
+    const int minActionWidth = 96;
     const int minSessionWidth = 180;
-    const int chromeWidth = 24;
+    const int chromeWidth = 6;
 
     auto sessionWidth = [&]() {
         return viewportWidth - (projectWidth + terminalWidth + toolWidth + statusWidth + actionWidth + chromeWidth);
@@ -3610,7 +4163,12 @@ void MainWindow::updateMonitorTableColumns(QTreeWidget *tree)
     shrinkToFit(statusWidth, minStatusWidth);
     shrinkToFit(actionWidth, minActionWidth);
 
-    const int finalSessionWidth = qMax(minSessionWidth, sessionWidth());
+    int finalSessionWidth = qMax(minSessionWidth, sessionWidth());
+    const int extraWidth = viewportWidth - (projectWidth + terminalWidth + toolWidth + finalSessionWidth + statusWidth + actionWidth + chromeWidth);
+    if (extraWidth > 0) {
+        finalSessionWidth += (extraWidth * 2) / 3;
+        projectWidth += extraWidth / 3;
+    }
 
     tree->setColumnWidth(0, projectWidth);
     tree->setColumnWidth(1, terminalWidth);

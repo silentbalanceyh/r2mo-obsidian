@@ -4,6 +4,8 @@
 #include <QObject>
 #include <QString>
 #include <QSettings>
+#include <QList>
+#include "specialmonitorfetcher.h"
 
 class SettingsManager : public QObject
 {
@@ -31,6 +33,16 @@ public:
     // Last opened vault
     QString lastVaultPath() const;
     void setLastVaultPath(const QString& path);
+
+    // Special monitor sources
+    QList<SpecialMonitorSource> specialMonitorSources() const;
+    void setSpecialMonitorSources(const QList<SpecialMonitorSource>& sources);
+
+    // Header states
+    QByteArray monitorBoardHeaderState() const;
+    void setMonitorBoardHeaderState(const QByteArray& state);
+    QByteArray specialMonitorHeaderState() const;
+    void setSpecialMonitorHeaderState(const QByteArray& state);
     
     void sync();
 

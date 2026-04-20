@@ -15,9 +15,9 @@ endif()
 option(BUILD_TRANSLATIONS "Build Qt translation files" ON)
 
 if(BUILD_TRANSLATIONS)
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql Concurrent LinguistTools)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql Concurrent Network LinguistTools)
 else()
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql Concurrent)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Sql Concurrent Network)
 endif()
 
 # Source files - Modular structure
@@ -56,6 +56,8 @@ src/utils/aitoolscanner.cpp
      src/utils/sessionscanner.h
      src/utils/gitscanner.cpp
     src/utils/gitscanner.h
+    src/utils/specialmonitorfetcher.cpp
+    src/utils/specialmonitorfetcher.h
 )
 
 # Font resources
@@ -87,6 +89,7 @@ target_link_libraries(ObsidianManager PRIVATE
     Qt6::Widgets
     Qt6::Sql
     Qt6::Concurrent
+    Qt6::Network
 )
 
 # Include directories

@@ -11,6 +11,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QTreeWidget>
+#include <QTableWidget>
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QTabWidget>
@@ -24,6 +25,7 @@
 #include "utils/aitoolscanner.h"
 #include "utils/r2moscanner.h"
 #include "utils/sessionscanner.h"
+#include "utils/specialmonitorfetcher.h"
 
 // Forward declarations
 class VaultModel;
@@ -127,6 +129,14 @@ private:
     void refreshMonitorAsync();
     QList<QPair<QString, QString>> collectAllProjectPaths();
     QWidget* buildMonitorView(const QList<ProjectMonitorData>& data);
+    QWidget* buildSpecialMonitorPanel();
+    void updateSpecialMonitorPanelSizing();
+    void refreshSpecialMonitorAsync();
+    void updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& snapshots);
+    void updateSpecialMonitorTableColumns();
+    void addSpecialMonitorSource();
+    void editSpecialMonitorSource();
+    void removeSpecialMonitorSource();
     void updateMonitorTableColumns(QTreeWidget *tree);
     void replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab);
     bool updateMonitorStatusCells(const QList<ProjectMonitorData>& data);
@@ -204,6 +214,14 @@ private:
     bool m_monitorRefreshing;
     QLabel *m_monitorProgressLabel;
     int m_monitorProgressStep;
+    QWidget *m_specialMonitorPanel;
+    QTableWidget *m_specialMonitorTable;
+    QFutureWatcher<QList<SpecialMonitorSnapshot>> *m_specialMonitorScanWatcher;
+    bool m_specialMonitorRefreshing;
+    QLabel *m_specialMonitorStatusLabel;
+    QSplitter *m_monitorVerticalSplitter;
+    int m_specialMonitorPanelStretchId;
+    bool m_specialMonitorPanelUserResized;
 
     // Modules (not owned)
     VaultModel *m_vaultModel;

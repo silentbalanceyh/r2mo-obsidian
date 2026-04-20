@@ -293,5 +293,161 @@ Please set it in Settings.</source>
         <source>📁 Parent Project    📂 Sub-project</source>
         <translation>📁 父项目    📂 子项目</translation>
     </message>
+    <message>
+        <source>Refreshing...</source>
+        <translation>刷新中...</translation>
+    </message>
+    <message>
+        <source>Not loaded</source>
+        <translation>未加载</translation>
+    </message>
+    <message>
+        <source>Unknown</source>
+        <translation>未知</translation>
+    </message>
+    <message>
+        <source>No token sources</source>
+        <translation>暂无 Token 源</translation>
+    </message>
+    <message>
+        <source>%1 token(s)</source>
+        <translation>%1 个 Token</translation>
+    </message>
+    <message>
+        <source>🔑 ⚙️ Special Billing</source>
+        <translation>🔑 ⚙️ 特殊计费板</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>空闲</translation>
+    </message>
+    <message>
+        <source>Provider</source>
+        <translation>Provider</translation>
+    </message>
+    <message>
+        <source>Token</source>
+        <translation>Token</translation>
+    </message>
+    <message>
+        <source>🔑 Account</source>
+        <translation>🔑 账号</translation>
+    </message>
+    <message>
+        <source>⚙️ Type</source>
+        <translation>⚙️ 类型</translation>
+    </message>
+    <message>
+        <source>🕒 Updated</source>
+        <translation>🕒 更新时间</translation>
+    </message>
+    <message>
+        <source>Add Token Source</source>
+        <translation>添加 Token 源</translation>
+    </message>
+    <message>
+        <source>Edit Token Source</source>
+        <translation>编辑 Token 源</translation>
+    </message>
+    <message>
+        <source>Enter token key</source>
+        <translation>输入 token key</translation>
+    </message>
+    <message>
+        <source>Token Key</source>
+        <translation>Token Key</translation>
+    </message>
+    <message>
+        <source>Token key cannot be empty.</source>
+        <translation>Token key 不能为空。</translation>
+    </message>
+    <message>
+        <source>Duplicate Token Source</source>
+        <translation>重复的 Token 源</translation>
+    </message>
+    <message>
+        <source>This provider and token already exist.</source>
+        <translation>该 Provider 和 Token 已存在。</translation>
+    </message>
+    <message>
+        <source>OK</source>
+        <translation>确定</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>添加</translation>
+    </message>
+    <message>
+        <source>Edit</source>
+        <translation>编辑</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>移除</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation>刷新</translation>
+    </message>
+    <message>
+        <source>Monitor Board</source>
+        <translation>实时监控板</translation>
+    </message>
+    <message>
+        <source>Working</source>
+        <translation>工作中</translation>
+    </message>
+    <message>
+        <source>Ready</source>
+        <translation>就绪</translation>
+    </message>
+    <message>
+        <source>Project</source>
+        <translation>项目</translation>
+    </message>
+    <message>
+        <source>Terminal</source>
+        <translation>终端</translation>
+    </message>
+    <message>
+        <source>AI Tool</source>
+        <translation>AI 工具</translation>
+    </message>
+    <message>
+        <source>Session</source>
+        <translation>会话</translation>
+    </message>
+    <message>
+        <source>Action</source>
+        <translation>操作</translation>
+    </message>
+    <message>
+        <source>No active AI sessions detected.</source>
+        <translation>未检测到活跃的 AI 会话。</translation>
+    </message>
+    <message>
+        <source>➕ Today Added</source>
+        <translation>➕ 今日新增</translation>
+    </message>
+    <message>
+        <source>🔥 Today Used</source>
+        <translation>🔥 今日使用</translation>
+    </message>
+    <message>
+        <source>🎯 Remain</source>
+        <translation>🎯 今日剩余</translation>
+    </message>
+    <message>
+        <source>📈 Usage Count</source>
+        <translation>📈 使用次数</translation>
+    </message>
+    <message>
+        <source>💎 Opus</source>
+        <translation>💎 Opus 次数</translation>
+    </message>
 </context>
 </TS>
