@@ -121,12 +121,17 @@ jobs:
 
           RELEASE_ID=""
 
-          CODE=$(curl -sS -o /tmp/release.json -w "%{http_code}" "${API}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}")
+          echo "Checking Gitee release ${RELEASE_TAG}"
+          CODE=$(curl -sS -o /tmp/release.json -w "%{http_code}" \
+            --connect-timeout 20 --max-time 60 --retry 2 --retry-delay 5 \
+            "${API}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}")
+          echo "Release lookup HTTP ${CODE}"
           if [ "$CODE" = "200" ]; then
             RELEASE_ID=$(python3 -c "import json;d=json.load(open('/tmp/release.json'));print(d.get('id','') if isinstance(d,dict) else '')" 2>/dev/null || true)
           fi
 
           if [ -z "$RELEASE_ID" ]; then
+            echo "Creating Gitee release ${RELEASE_TAG}"
             CREATE_CODE=$(curl -sS -o /tmp/create_release.json -w "%{http_code}" -X POST "${API}/releases" \
               --connect-timeout 20 --max-time 120 --retry 2 --retry-delay 5 \
               -F "access_token=${GITEE_TOKEN}" \
@@ -154,6 +159,7 @@ jobs:
             exit 1
           fi
 
+          echo "Gitee release id: ${RELEASE_ID}"
           for f in dist/*; do
             [ -f "$f" ] || continue
             n=$(basename "$f")
