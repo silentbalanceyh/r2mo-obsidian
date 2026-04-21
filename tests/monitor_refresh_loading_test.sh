@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 header="$repo_root/src/mainwindow.h"
 source="$repo_root/src/mainwindow.cpp"
+settings_source="$repo_root/src/utils/settingsmanager.cpp"
 
 require_pattern() {
     local pattern="$1"
@@ -11,6 +12,17 @@ require_pattern() {
     local message="$3"
 
     if ! grep -Eq "$pattern" "$file"; then
+        echo "FAIL: $message" >&2
+        exit 1
+    fi
+}
+
+forbid_pattern() {
+    local pattern="$1"
+    local file="$2"
+    local message="$3"
+
+    if grep -Eq "$pattern" "$file"; then
         echo "FAIL: $message" >&2
         exit 1
     fi
@@ -44,8 +56,14 @@ require_pattern 'QProgressBar[^\\n]*statusBar' "$source" \
     "Monitor row status must be rendered with progress bars instead of simple dots."
 require_pattern 'setObjectName[[:space:]]*\([[:space:]]*"monitorStatusBar"[[:space:]]*\)' "$source" \
     "Monitor status progress bars must use a stable object name."
-require_pattern 'setFixedWidth[[:space:]]*\([[:space:]]*128[[:space:]]*\)' "$source" \
-    "Monitor status progress bars must be widened to better use available horizontal space."
+require_pattern 'setFixedWidth[[:space:]]*\([[:space:]]*256[[:space:]]*\)' "$source" \
+    "Monitor status progress bars must be widened to double the previous width."
+require_pattern 'statusWidth[[:space:]]*=.*304.*336' "$source" \
+    "Monitor status column width must be expanded to fit the wider bar and visible status text."
+require_pattern 'minStatusWidth[[:space:]]*=[[:space:]]*280' "$source" \
+    "Monitor status column minimum width must prevent the column from collapsing below the control width."
+require_pattern 'monitorBoardHeaderState\\.v3' "$settings_source" \
+    "Monitor board header persistence version must be bumped so stale saved widths do not override the new status column layout."
 require_pattern 'QLabel[^\\n]*statusTextLabel' "$source" \
     "Monitor status presentation must preserve visible status text beside the progress bar."
 require_pattern 'setObjectName[[:space:]]*\([[:space:]]*"monitorStatusText"[[:space:]]*\)' "$source" \
@@ -60,6 +78,10 @@ require_pattern '#d9ecff' "$source" \
     "Ready state must use a blue waiting-style progress bar instead of a grey disabled look."
 require_pattern 'setProperty[[:space:]]*\([[:space:]]*"slowMode"[[:space:]]*,[[:space:]]*true[[:space:]]*\)' "$source" \
     "Working monitor bars must be marked for slower animation handling."
+forbid_pattern 'auto createLegend' "$source" \
+    "Monitor board should no longer render the top legend/status indicator strip."
+forbid_pattern 'legendLayout->addWidget\\(createLegend' "$source" \
+    "Monitor board should no longer add the removed top legend widgets."
 require_pattern 'm_specialMonitorStatusLabel->setText[[:space:]]*\([[:space:]]*tr\("Refreshing\.\.\."\)[[:space:]]*\)' "$source" \
     "Special billing refresh must keep its own status-label loading state."
 require_pattern 'void[[:space:]]+setSpecialMonitorRefreshLoading[[:space:]]*\([[:space:]]*bool[[:space:]]+loading[[:space:]]*\)' "$header" \

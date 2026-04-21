@@ -143,9 +143,10 @@ private:
     void replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab);
     void setMonitorRefreshEnabled(bool enabled);
     void setMonitorRefreshLoading(bool loading);
+    QString formatSessionRuntime(qint64 runtimeSeconds) const;
     bool updateMonitorStatusCells(const QList<ProjectMonitorData>& data);
     QString monitorRowKey(const QString& projectPath, const SessionInfo& session) const;
-    void updateMonitorStatusLabel(QLabel *label, SessionStatus status) const;
+    void updateMonitorStatusLabel(QWidget *label, SessionStatus status) const;
     void showSessionDetailDialog(const SessionInfo& session);
     void syncVaultOrderFromList();
     void openMonitorTarget(QTreeWidgetItem *row);

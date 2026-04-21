@@ -615,6 +615,7 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
                                               const QString& toolName, const QString& sessionId,
                                               const QString& sessionPath)
 {
+    const double workingKeepAliveSeconds = 6.0;
     const SessionStatus artifactStatus = inferArtifactStatus(toolName, sessionId, sessionPath);
     if (artifactStatus != SessionStatus::Unknown) {
         if (artifactStatus == SessionStatus::Working) {
@@ -664,7 +665,7 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
 
     if (s_lastWorkingTime.contains(pid)) {
         qint64 secsSinceWork = s_lastWorkingTime[pid].secsTo(QDateTime::currentDateTime());
-        if (secsSinceWork < 2) {
+        if (secsSinceWork < workingKeepAliveSeconds) {
             return SessionStatus::Working;
         }
     }
@@ -1075,11 +1076,26 @@ QList<SessionInfo> SessionScanner::detectTerminalProcessSessions(
                 si.projectPath = normalizePath(cwd);
                 si.lastActivity = QDateTime::currentDateTime();
                 si.detailText = cmd;
+                si.runtimeSeconds = 0;
                 resolveSessionArtifact(si.projectPath, toolName, cmd, si.sessionId, si.sessionPath);
                 if (si.sessionId.isEmpty()) {
                     si.sessionId = QString("unknown");
                 }
                 si.status = determineStatus(pid, ticks, isRunning, si.toolName, si.sessionId, si.sessionPath);
+                const qint64 runningSeconds = si.lastActivity.isValid()
+                    ? qMax<qint64>(0, si.lastActivity.secsTo(QDateTime::currentDateTime()))
+                    : 0;
+                if (!si.sessionPath.isEmpty()) {
+                    const QFileInfo sessionFile(si.sessionPath);
+                    if (sessionFile.exists() && sessionFile.lastModified().isValid()) {
+                        si.lastActivity = sessionFile.lastModified();
+                        si.runtimeSeconds = qMax<qint64>(0, sessionFile.lastModified().secsTo(QDateTime::currentDateTime()));
+                    } else {
+                        si.runtimeSeconds = runningSeconds;
+                    }
+                } else {
+                    si.runtimeSeconds = runningSeconds;
+                }
 
                 const QString dedupeSessionId = hasKnownSessionId(si.sessionId)
                     ? si.sessionId

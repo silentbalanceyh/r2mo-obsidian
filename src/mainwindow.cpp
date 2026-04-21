@@ -3902,6 +3902,25 @@ void MainWindow::setMonitorRefreshLoading(bool loading)
     overlay->raise();
 }
 
+QString MainWindow::formatSessionRuntime(qint64 runtimeSeconds) const
+{
+    const qint64 safeSeconds = qMax<qint64>(0, runtimeSeconds);
+    const qint64 hours = safeSeconds / 3600;
+    const qint64 minutes = (safeSeconds % 3600) / 60;
+    const qint64 seconds = safeSeconds % 60;
+
+    if (hours > 0) {
+        return QStringLiteral("%1:%2:%3")
+            .arg(hours)
+            .arg(minutes, 2, 10, QChar('0'))
+            .arg(seconds, 2, 10, QChar('0'));
+    }
+
+    return QStringLiteral("%1:%2")
+        .arg(minutes, 2, 10, QChar('0'))
+        .arg(seconds, 2, 10, QChar('0'));
+}
+
 void MainWindow::replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab)
 {
     if (!newContent) {
@@ -3951,7 +3970,7 @@ QString MainWindow::monitorRowKey(const QString& projectPath, const SessionInfo&
         .arg(projectPath, session.toolName, stableSessionKey, QString::number(stableShellKey));
 }
 
-void MainWindow::updateMonitorStatusLabel(QLabel *label, SessionStatus status) const
+void MainWindow::updateMonitorStatusLabel(QWidget *label, SessionStatus status) const
 {
     if (!label) {
         return;
@@ -3984,7 +4003,13 @@ void MainWindow::updateMonitorStatusLabel(QLabel *label, SessionStatus status) c
     }
 
     if (QLabel *statusTextLabel = label->findChild<QLabel*>("monitorStatusText")) {
-        statusTextLabel->setText(statusText);
+        const qint64 runtimeSeconds = label->property("runtimeSeconds").toLongLong();
+        statusTextLabel->setText(QString("%1 %2").arg(statusText, formatSessionRuntime(runtimeSeconds)));
+        if (status == SessionStatus::Working) {
+            statusTextLabel->setStyleSheet("QLabel { color: #34c759; font-size: 11px; background: transparent; border: none; padding-left: 8px; font-weight: 600; }");
+        } else {
+            statusTextLabel->setStyleSheet("QLabel { color: #007aff; font-size: 11px; background: transparent; border: none; padding-left: 8px; font-weight: 600; }");
+        }
     }
 
     label->setToolTip(statusText);
@@ -4030,7 +4055,11 @@ bool MainWindow::updateMonitorStatusCells(const QList<ProjectMonitorData>& data)
 
         const SessionStatus status = expectedRows[i].second;
         row->setData(0, Qt::UserRole + 6, static_cast<int>(status));
-        QLabel *statusLabel = qobject_cast<QLabel*>(tree->itemWidget(row, 4));
+        QWidget *statusLabel = tree->itemWidget(row, 4);
+        if (!statusLabel) {
+            continue;
+        }
+        statusLabel->setProperty("runtimeSeconds", row->data(0, Qt::UserRole + 11));
         updateMonitorStatusLabel(statusLabel, status);
     }
 
@@ -4054,48 +4083,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
         return container;
     }
 
-    // Legend + Refresh
     QHBoxLayout *legendLayout = new QHBoxLayout();
-
-    auto createLegend = [this](const QString& text, bool working) {
-        QWidget *legendWidget = new QWidget();
-        QHBoxLayout *legendItemLayout = new QHBoxLayout(legendWidget);
-        legendItemLayout->setContentsMargins(0, 0, 0, 0);
-        legendItemLayout->setSpacing(6);
-
-        QProgressBar *statusBar = new QProgressBar(legendWidget);
-        statusBar->setObjectName("monitorStatusBar");
-        statusBar->setTextVisible(false);
-        statusBar->setFixedWidth(128);
-        statusBar->setFixedHeight(12);
-        if (working) {
-            statusBar->setStyleSheet(
-                "QProgressBar#monitorStatusBar { border: 1px solid #bfe7c8; border-radius: 6px; background: #edf9f0; padding: 0; }"
-                "QProgressBar#monitorStatusBar::chunk { background: #34c759; border-radius: 5px; }");
-            statusBar->setProperty("slowMode", true);
-            statusBar->setRange(0, 0);
-        } else {
-            statusBar->setStyleSheet(
-                "QProgressBar#monitorStatusBar { border: 1px solid #9bc7ff; border-radius: 6px; background: #d9ecff; padding: 0; }"
-                "QProgressBar#monitorStatusBar::chunk { background: #4f9cff; border-radius: 5px; }");
-            statusBar->setProperty("slowMode", false);
-            statusBar->setRange(0, 100);
-            statusBar->setValue(0);
-        }
-        legendItemLayout->addWidget(statusBar);
-
-        QLabel *statusTextLabel = new QLabel(text, legendWidget);
-        statusTextLabel->setObjectName("monitorStatusText");
-        QLabel *legendLabel = statusTextLabel;
-        legendLabel->setStyleSheet("QLabel { color: #86868b; font-size: 11px; background: transparent; border: none; }");
-        legendItemLayout->addWidget(legendLabel);
-
-        return legendWidget;
-    };
-
-    legendLayout->addWidget(createLegend(tr("Working"), true));
-    legendLayout->addWidget(createLegend(tr("Ready"), false));
-
     legendLayout->addStretch();
 
     QPushButton *refreshBtn = new QPushButton(tr("Refresh"));
@@ -4193,25 +4181,24 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
                 row->setToolTip(3, QString("Session: %1\nTool: %2\nPath: %3").arg(si.sessionId, si.toolName, si.projectPath));
 
                 // Col 4: Status
-                QLabel *statusLabel = new QLabel();
-                statusLabel->setAlignment(Qt::AlignCenter);
-                statusLabel->setStyleSheet("QLabel { background: transparent; border: none; padding: 0 4px; }");
-                QHBoxLayout *statusLayout = new QHBoxLayout(statusLabel);
+                QWidget *statusContainer = new QWidget();
+                statusContainer->setStyleSheet("QWidget { background: transparent; border: none; }");
+                QHBoxLayout *statusLayout = new QHBoxLayout(statusContainer);
                 statusLayout->setContentsMargins(4, 0, 4, 0);
                 statusLayout->setAlignment(Qt::AlignCenter);
-                statusLayout->setSpacing(0);
-                QProgressBar *statusBar = new QProgressBar(statusLabel);
+                statusLayout->setSpacing(8);
+                QProgressBar *statusBar = new QProgressBar(statusContainer);
                 statusBar->setObjectName("monitorStatusBar");
                 statusBar->setTextVisible(false);
-                statusBar->setFixedWidth(128);
+                statusBar->setFixedWidth(256);
                 statusBar->setFixedHeight(12);
                 statusLayout->addWidget(statusBar);
-                QLabel *statusTextLabel = new QLabel(statusLabel);
+                QLabel *statusTextLabel = new QLabel(statusContainer);
                 statusTextLabel->setObjectName("monitorStatusText");
-                statusTextLabel->setStyleSheet("QLabel { color: #5f6368; font-size: 11px; background: transparent; border: none; padding-left: 8px; }");
                 statusLayout->addWidget(statusTextLabel);
-                updateMonitorStatusLabel(statusLabel, si.status);
-                tree->setItemWidget(row, 4, statusLabel);
+                statusContainer->setProperty("runtimeSeconds", si.runtimeSeconds);
+                updateMonitorStatusLabel(statusContainer, si.status);
+                tree->setItemWidget(row, 4, statusContainer);
 
                 // Col 5: Goto button - activate terminal directly
                 QPushButton *gotoBtn = new QPushButton(tr("Goto"));
@@ -4233,6 +4220,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
                 row->setData(0, Qt::UserRole + 8, si.processPid);
                 row->setData(0, Qt::UserRole + 9, si.sessionId);
                 row->setData(0, Qt::UserRole + 10, monitorRowKey(pmd.projectPath, si));
+                row->setData(0, Qt::UserRole + 11, si.runtimeSeconds);
 
                 connect(gotoBtn, &QPushButton::clicked, this, [this, row]() {
                     openMonitorTarget(row);
@@ -4329,12 +4317,12 @@ void MainWindow::updateMonitorTableColumns(QTreeWidget *tree)
     int projectWidth = qBound(150, viewportWidth / 8, 240);
     int terminalWidth = viewportWidth < 820 ? 108 : (viewportWidth < 1120 ? 124 : 144);
     int toolWidth = viewportWidth < 820 ? 136 : (viewportWidth < 1120 ? 168 : 196);
-    int statusWidth = viewportWidth < 820 ? 104 : 124;
+    int statusWidth = viewportWidth < 820 ? 304 : 336;
     int actionWidth = viewportWidth < 820 ? 104 : 128;
     const int minProjectWidth = 112;
     const int minTerminalWidth = 96;
     const int minToolWidth = 128;
-    const int minStatusWidth = 96;
+    const int minStatusWidth = 280;
     const int minActionWidth = 96;
     const int minSessionWidth = 180;
     const int chromeWidth = 6;

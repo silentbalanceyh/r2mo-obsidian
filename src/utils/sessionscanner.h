@@ -27,6 +27,7 @@ struct SessionInfo {
     qint64 processPid;
     SessionStatus status;
     QDateTime lastActivity;
+    qint64 runtimeSeconds;
     QString sessionPath;
     QString detailText;
 };
