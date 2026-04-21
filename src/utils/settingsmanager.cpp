@@ -118,12 +118,12 @@ void SettingsManager::setSpecialMonitorSources(const QList<SpecialMonitorSource>
 
 QByteArray SettingsManager::monitorBoardHeaderState() const
 {
-    return m_settings.value("monitorBoardHeaderState.v3").toByteArray();
+    return m_settings.value("monitorBoardHeaderState.v4").toByteArray();
 }
 
 void SettingsManager::setMonitorBoardHeaderState(const QByteArray& state)
 {
-    m_settings.setValue("monitorBoardHeaderState.v3", state);
+    m_settings.setValue("monitorBoardHeaderState.v4", state);
 }
 
 QByteArray SettingsManager::specialMonitorHeaderState() const

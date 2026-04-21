@@ -4005,10 +4005,11 @@ void MainWindow::updateMonitorStatusLabel(QWidget *label, SessionStatus status) 
     if (QLabel *statusTextLabel = label->findChild<QLabel*>("monitorStatusText")) {
         const qint64 runtimeSeconds = label->property("runtimeSeconds").toLongLong();
         statusTextLabel->setText(QString("%1 %2").arg(statusText, formatSessionRuntime(runtimeSeconds)));
+        statusTextLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         if (status == SessionStatus::Working) {
-            statusTextLabel->setStyleSheet("QLabel { color: #34c759; font-size: 11px; background: transparent; border: none; padding-left: 8px; font-weight: 600; }");
+            statusTextLabel->setStyleSheet("QLabel { color: #34c759; font-size: 12px; background: transparent; border: none; padding-left: 8px; font-weight: 600; }");
         } else {
-            statusTextLabel->setStyleSheet("QLabel { color: #007aff; font-size: 11px; background: transparent; border: none; padding-left: 8px; font-weight: 600; }");
+            statusTextLabel->setStyleSheet("QLabel { color: #007aff; font-size: 12px; background: transparent; border: none; padding-left: 8px; font-weight: 600; }");
         }
     }
 
@@ -4183,18 +4184,23 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
                 // Col 4: Status
                 QWidget *statusContainer = new QWidget();
                 statusContainer->setStyleSheet("QWidget { background: transparent; border: none; }");
+                statusContainer->setMinimumWidth(344);
                 QHBoxLayout *statusLayout = new QHBoxLayout(statusContainer);
                 statusLayout->setContentsMargins(4, 0, 4, 0);
-                statusLayout->setAlignment(Qt::AlignCenter);
+                statusLayout->setAlignment(Qt::AlignVCenter);
                 statusLayout->setSpacing(8);
                 QProgressBar *statusBar = new QProgressBar(statusContainer);
                 statusBar->setObjectName("monitorStatusBar");
                 statusBar->setTextVisible(false);
-                statusBar->setFixedWidth(256);
+                statusBar->setMinimumWidth(220);
+                statusBar->setMaximumWidth(240);
                 statusBar->setFixedHeight(12);
+                statusBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
                 statusLayout->addWidget(statusBar);
                 QLabel *statusTextLabel = new QLabel(statusContainer);
                 statusTextLabel->setObjectName("monitorStatusText");
+                statusTextLabel->setMinimumWidth(104);
+                statusTextLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
                 statusLayout->addWidget(statusTextLabel);
                 statusContainer->setProperty("runtimeSeconds", si.runtimeSeconds);
                 updateMonitorStatusLabel(statusContainer, si.status);
@@ -4317,12 +4323,12 @@ void MainWindow::updateMonitorTableColumns(QTreeWidget *tree)
     int projectWidth = qBound(150, viewportWidth / 8, 240);
     int terminalWidth = viewportWidth < 820 ? 108 : (viewportWidth < 1120 ? 124 : 144);
     int toolWidth = viewportWidth < 820 ? 136 : (viewportWidth < 1120 ? 168 : 196);
-    int statusWidth = viewportWidth < 820 ? 304 : 336;
+    int statusWidth = viewportWidth < 820 ? 344 : 372;
     int actionWidth = viewportWidth < 820 ? 104 : 128;
     const int minProjectWidth = 112;
     const int minTerminalWidth = 96;
     const int minToolWidth = 128;
-    const int minStatusWidth = 280;
+    const int minStatusWidth = 336;
     const int minActionWidth = 96;
     const int minSessionWidth = 180;
     const int chromeWidth = 6;
