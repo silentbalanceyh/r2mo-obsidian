@@ -132,6 +132,8 @@ private:
     QWidget* buildSpecialMonitorPanel();
     void updateSpecialMonitorPanelSizing();
     void refreshSpecialMonitorAsync();
+    void setSpecialMonitorActionsEnabled(bool enabled);
+    void setSpecialMonitorRefreshLoading(bool loading);
     void updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& snapshots);
     void updateSpecialMonitorTableColumns();
     void addSpecialMonitorSource();
@@ -139,6 +141,8 @@ private:
     void removeSpecialMonitorSource();
     void updateMonitorTableColumns(QTreeWidget *tree);
     void replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab);
+    void setMonitorRefreshEnabled(bool enabled);
+    void setMonitorRefreshLoading(bool loading);
     bool updateMonitorStatusCells(const QList<ProjectMonitorData>& data);
     QString monitorRowKey(const QString& projectPath, const SessionInfo& session) const;
     void updateMonitorStatusLabel(QLabel *label, SessionStatus status) const;

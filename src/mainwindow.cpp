@@ -56,6 +56,7 @@
 #include <QToolButton>
 #include <QProgressBar>
 #include <QClipboard>
+#include <QStackedLayout>
 #include <QtConcurrent>
 #include <QPainter>
 #include <QPainterPath>
@@ -920,6 +921,8 @@ void MainWindow::setupConnections()
                 QWidget *newWidget = buildMonitorView(data);
                 replaceMonitorContent(newWidget, true);
             }
+            setMonitorRefreshEnabled(true);
+            setMonitorRefreshLoading(false);
             m_monitorRefreshing = false;
         }
     });
@@ -928,6 +931,8 @@ void MainWindow::setupConnections()
     connect(m_specialMonitorScanWatcher, &QFutureWatcher<QList<SpecialMonitorSnapshot>>::finished, this, [this]() {
         if (m_specialMonitorRefreshing) {
             updateSpecialMonitorTable(m_specialMonitorScanWatcher->result());
+            setSpecialMonitorActionsEnabled(true);
+            setSpecialMonitorRefreshLoading(false);
             m_specialMonitorRefreshing = false;
         }
     });
@@ -1607,11 +1612,48 @@ void MainWindow::refreshSpecialMonitorAsync()
 
     m_specialMonitorRefreshing = true;
     m_specialMonitorStatusLabel->setText(tr("Refreshing..."));
+    setSpecialMonitorActionsEnabled(false);
+    setSpecialMonitorRefreshLoading(true);
     QFuture<QList<SpecialMonitorSnapshot>> future = QtConcurrent::run([sources]() {
         SpecialMonitorFetcher fetcher;
         return fetcher.fetchSnapshots(sources);
     });
     m_specialMonitorScanWatcher->setFuture(future);
+}
+
+void MainWindow::setSpecialMonitorActionsEnabled(bool enabled)
+{
+    if (!m_specialMonitorPanel) {
+        return;
+    }
+
+    const QStringList buttonIds = {
+        QStringLiteral("specialMonitorAddButton"),
+        QStringLiteral("specialMonitorEditButton"),
+        QStringLiteral("specialMonitorRemoveButton"),
+        QStringLiteral("specialMonitorRefreshButton")
+    };
+
+    for (const QString& buttonId : buttonIds) {
+        if (QPushButton *button = m_specialMonitorPanel->findChild<QPushButton*>(buttonId)) {
+            button->setEnabled(enabled);
+        }
+    }
+}
+
+void MainWindow::setSpecialMonitorRefreshLoading(bool loading)
+{
+    if (!m_specialMonitorPanel) {
+        return;
+    }
+
+    QWidget *overlay = m_specialMonitorPanel->findChild<QWidget*>("specialMonitorRefreshOverlay");
+    if (!overlay) {
+        return;
+    }
+
+    overlay->setVisible(loading);
+    overlay->raise();
 }
 
 void MainWindow::updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& snapshots)
@@ -1801,6 +1843,10 @@ QWidget* MainWindow::buildSpecialMonitorPanel()
     QPushButton *editBtn = new QPushButton(tr("Edit"));
     QPushButton *removeBtn = new QPushButton(tr("Remove"));
     QPushButton *refreshBtn = new QPushButton(tr("Refresh"));
+    addBtn->setObjectName("specialMonitorAddButton");
+    editBtn->setObjectName("specialMonitorEditButton");
+    removeBtn->setObjectName("specialMonitorRemoveButton");
+    refreshBtn->setObjectName("specialMonitorRefreshButton");
     const QString actionButtonStyle =
         "QPushButton { background: #f5f5f7; color: #4a4a4a; font-size: 11px; border: 1px solid #d7d7dc; border-radius: 4px; padding: 2px 10px; min-width: 80px; min-height: 24px; }"
         "QPushButton:hover { background: #ececf1; color: #1d1d1f; }";
@@ -1811,6 +1857,10 @@ QWidget* MainWindow::buildSpecialMonitorPanel()
     editBtn->setStyleSheet(actionButtonStyle);
     removeBtn->setStyleSheet(dangerButtonStyle);
     refreshBtn->setStyleSheet(actionButtonStyle);
+    addBtn->setCursor(Qt::PointingHandCursor);
+    editBtn->setCursor(Qt::PointingHandCursor);
+    removeBtn->setCursor(Qt::PointingHandCursor);
+    refreshBtn->setCursor(Qt::PointingHandCursor);
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::addSpecialMonitorSource);
     connect(editBtn, &QPushButton::clicked, this, &MainWindow::editSpecialMonitorSource);
     connect(removeBtn, &QPushButton::clicked, this, &MainWindow::removeSpecialMonitorSource);
@@ -1875,7 +1925,36 @@ QWidget* MainWindow::buildSpecialMonitorPanel()
         m_settingsManager->setSpecialMonitorHeaderState(m_specialMonitorTable->horizontalHeader()->saveState());
         m_settingsManager->sync();
     });
-    layout->addWidget(m_specialMonitorTable, 1);
+    QWidget *tableHost = new QWidget(panel);
+    tableHost->setObjectName("specialMonitorTableHost");
+    QStackedLayout *tableHostLayout = new QStackedLayout(tableHost);
+    tableHostLayout->setContentsMargins(0, 0, 0, 0);
+    tableHostLayout->setStackingMode(QStackedLayout::StackAll);
+    tableHostLayout->addWidget(m_specialMonitorTable);
+
+    QWidget *refreshOverlay = new QWidget(tableHost);
+    refreshOverlay->setObjectName("specialMonitorRefreshOverlay");
+    refreshOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+    refreshOverlay->setStyleSheet("QWidget#specialMonitorRefreshOverlay { background: rgba(250, 250, 250, 214); border: 1px solid #e8e8ed; border-radius: 6px; }");
+    QVBoxLayout *overlayLayout = new QVBoxLayout(refreshOverlay);
+    overlayLayout->setAlignment(Qt::AlignCenter);
+    overlayLayout->setSpacing(10);
+
+    QLabel *overlayTitle = new QLabel(tr("Refreshing..."), refreshOverlay);
+    overlayTitle->setAlignment(Qt::AlignCenter);
+    overlayTitle->setStyleSheet("QLabel { color: #1d1d1f; font-size: 14px; font-weight: 600; background: transparent; }");
+    overlayLayout->addWidget(overlayTitle);
+
+    QProgressBar *overlayProgress = new QProgressBar(refreshOverlay);
+    overlayProgress->setRange(0, 0);
+    overlayProgress->setFixedWidth(220);
+    overlayProgress->setTextVisible(false);
+    overlayProgress->setStyleSheet("QProgressBar { border: 1px solid #d0d0d7; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #34c759; border-radius: 3px; }");
+    overlayLayout->addWidget(overlayProgress);
+
+    tableHostLayout->addWidget(refreshOverlay);
+    refreshOverlay->hide();
+    layout->addWidget(tableHost, 1);
 
     updateSpecialMonitorTable({});
 
@@ -3786,6 +3865,8 @@ void MainWindow::refreshMonitorAsync()
     if (!m_monitorTabContent) return;
 
     m_monitorRefreshing = true;
+    setMonitorRefreshEnabled(false);
+    setMonitorRefreshLoading(true);
 
     QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
         QList<QPair<QString, QString>> projects = collectAllProjectPaths();
@@ -3793,6 +3874,32 @@ void MainWindow::refreshMonitorAsync()
         return scanner.scanLiveSessions(projects);
     });
     m_monitorScanWatcher->setFuture(future);
+}
+
+void MainWindow::setMonitorRefreshEnabled(bool enabled)
+{
+    if (!m_monitorTabContent) {
+        return;
+    }
+
+    if (QPushButton *button = m_monitorTabContent->findChild<QPushButton*>("monitorRefreshButton")) {
+        button->setEnabled(enabled);
+    }
+}
+
+void MainWindow::setMonitorRefreshLoading(bool loading)
+{
+    if (!m_monitorTabContent) {
+        return;
+    }
+
+    QWidget *overlay = m_monitorTabContent->findChild<QWidget*>("monitorRefreshOverlay");
+    if (!overlay) {
+        return;
+    }
+
+    overlay->setVisible(loading);
+    overlay->raise();
 }
 
 void MainWindow::replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab)
@@ -3851,17 +3958,35 @@ void MainWindow::updateMonitorStatusLabel(QLabel *label, SessionStatus status) c
     }
 
     QString statusText;
-    QString statusColor;
+    QString barStyle;
     if (status == SessionStatus::Working) {
-        statusColor = "#34c759";
         statusText = tr("Working");
+        barStyle =
+            "QProgressBar#monitorStatusBar { border: 1px solid #bfe7c8; border-radius: 6px; background: #edf9f0; padding: 0; }"
+            "QProgressBar#monitorStatusBar::chunk { background: #34c759; border-radius: 5px; }";
     } else {
-        statusColor = "#007aff";
         statusText = tr("Ready");
+        barStyle =
+            "QProgressBar#monitorStatusBar { border: 1px solid #9bc7ff; border-radius: 6px; background: #d9ecff; padding: 0; }"
+            "QProgressBar#monitorStatusBar::chunk { background: #4f9cff; border-radius: 5px; }";
     }
 
-    label->setText(QString("<span style='color: %1; font-size: 13px;'>&#9679;</span> <span style='font-size: 12px;'>%2</span>")
-                       .arg(statusColor, statusText));
+    if (QProgressBar *statusBar = label->findChild<QProgressBar*>("monitorStatusBar")) {
+        statusBar->setStyleSheet(barStyle);
+        if (status == SessionStatus::Working) {
+            statusBar->setProperty("slowMode", true);
+            statusBar->setRange(0, 0);
+        } else {
+            statusBar->setProperty("slowMode", false);
+            statusBar->setRange(0, 100);
+            statusBar->setValue(0);
+        }
+    }
+
+    if (QLabel *statusTextLabel = label->findChild<QLabel*>("monitorStatusText")) {
+        statusTextLabel->setText(statusText);
+    }
+
     label->setToolTip(statusText);
 }
 
@@ -3932,19 +4057,49 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
     // Legend + Refresh
     QHBoxLayout *legendLayout = new QHBoxLayout();
 
-    QLabel *workingLegend = new QLabel();
-    workingLegend->setStyleSheet("QLabel { background: transparent; border: none; }");
-    workingLegend->setText(QString("<span style='color: #34c759; font-size: 14px;'>&#9679;</span> <span style='color: #86868b; font-size: 11px;'>%1</span>").arg(tr("Working")));
-    legendLayout->addWidget(workingLegend);
+    auto createLegend = [this](const QString& text, bool working) {
+        QWidget *legendWidget = new QWidget();
+        QHBoxLayout *legendItemLayout = new QHBoxLayout(legendWidget);
+        legendItemLayout->setContentsMargins(0, 0, 0, 0);
+        legendItemLayout->setSpacing(6);
 
-    QLabel *readyLegend = new QLabel();
-    readyLegend->setStyleSheet("QLabel { background: transparent; border: none; }");
-    readyLegend->setText(QString("<span style='color: #007aff; font-size: 14px;'>&#9679;</span> <span style='color: #86868b; font-size: 11px;'>%1</span>").arg(tr("Ready")));
-    legendLayout->addWidget(readyLegend);
+        QProgressBar *statusBar = new QProgressBar(legendWidget);
+        statusBar->setObjectName("monitorStatusBar");
+        statusBar->setTextVisible(false);
+        statusBar->setFixedWidth(128);
+        statusBar->setFixedHeight(12);
+        if (working) {
+            statusBar->setStyleSheet(
+                "QProgressBar#monitorStatusBar { border: 1px solid #bfe7c8; border-radius: 6px; background: #edf9f0; padding: 0; }"
+                "QProgressBar#monitorStatusBar::chunk { background: #34c759; border-radius: 5px; }");
+            statusBar->setProperty("slowMode", true);
+            statusBar->setRange(0, 0);
+        } else {
+            statusBar->setStyleSheet(
+                "QProgressBar#monitorStatusBar { border: 1px solid #9bc7ff; border-radius: 6px; background: #d9ecff; padding: 0; }"
+                "QProgressBar#monitorStatusBar::chunk { background: #4f9cff; border-radius: 5px; }");
+            statusBar->setProperty("slowMode", false);
+            statusBar->setRange(0, 100);
+            statusBar->setValue(0);
+        }
+        legendItemLayout->addWidget(statusBar);
+
+        QLabel *statusTextLabel = new QLabel(text, legendWidget);
+        statusTextLabel->setObjectName("monitorStatusText");
+        QLabel *legendLabel = statusTextLabel;
+        legendLabel->setStyleSheet("QLabel { color: #86868b; font-size: 11px; background: transparent; border: none; }");
+        legendItemLayout->addWidget(legendLabel);
+
+        return legendWidget;
+    };
+
+    legendLayout->addWidget(createLegend(tr("Working"), true));
+    legendLayout->addWidget(createLegend(tr("Ready"), false));
 
     legendLayout->addStretch();
 
     QPushButton *refreshBtn = new QPushButton(tr("Refresh"));
+    refreshBtn->setObjectName("monitorRefreshButton");
     refreshBtn->setFixedSize(QSize(80, 24));
     refreshBtn->setCursor(Qt::PointingHandCursor);
     refreshBtn->setStyleSheet("QPushButton { background: #f5f5f7; color: #86868b; font-size: 11px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 2px 8px; } QPushButton:hover { background: #e8e8ed; color: #333; }");
@@ -4041,6 +4196,20 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
                 QLabel *statusLabel = new QLabel();
                 statusLabel->setAlignment(Qt::AlignCenter);
                 statusLabel->setStyleSheet("QLabel { background: transparent; border: none; padding: 0 4px; }");
+                QHBoxLayout *statusLayout = new QHBoxLayout(statusLabel);
+                statusLayout->setContentsMargins(4, 0, 4, 0);
+                statusLayout->setAlignment(Qt::AlignCenter);
+                statusLayout->setSpacing(0);
+                QProgressBar *statusBar = new QProgressBar(statusLabel);
+                statusBar->setObjectName("monitorStatusBar");
+                statusBar->setTextVisible(false);
+                statusBar->setFixedWidth(128);
+                statusBar->setFixedHeight(12);
+                statusLayout->addWidget(statusBar);
+                QLabel *statusTextLabel = new QLabel(statusLabel);
+                statusTextLabel->setObjectName("monitorStatusText");
+                statusTextLabel->setStyleSheet("QLabel { color: #5f6368; font-size: 11px; background: transparent; border: none; padding-left: 8px; }");
+                statusLayout->addWidget(statusTextLabel);
                 updateMonitorStatusLabel(statusLabel, si.status);
                 tree->setItemWidget(row, 4, statusLabel);
 
@@ -4080,18 +4249,44 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
         "QSplitter::handle:vertical:hover { background: #d0d0d7; }");
     m_specialMonitorPanelUserResized = false;
 
-    m_monitorVerticalSplitter->addWidget(tree);
+    QWidget *tableStack = new QWidget(container);
+    tableStack->setObjectName("monitorRefreshTableHost");
+    QStackedLayout *tableStackLayout = new QStackedLayout(tableStack);
+    tableStackLayout->setContentsMargins(0, 0, 0, 0);
+    tableStackLayout->setStackingMode(QStackedLayout::StackAll);
+    tableStackLayout->addWidget(tree);
+
+    QWidget *refreshOverlay = new QWidget(tableStack);
+    refreshOverlay->setObjectName("monitorRefreshOverlay");
+    refreshOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+    refreshOverlay->setStyleSheet("QWidget#monitorRefreshOverlay { background: rgba(255, 255, 255, 210); border: 1px solid #e8e8ed; border-radius: 6px; }");
+    QVBoxLayout *overlayLayout = new QVBoxLayout(refreshOverlay);
+    overlayLayout->setAlignment(Qt::AlignCenter);
+    overlayLayout->setSpacing(10);
+
+    QLabel *overlayTitle = new QLabel(tr("Refreshing..."), refreshOverlay);
+    overlayTitle->setAlignment(Qt::AlignCenter);
+    overlayTitle->setStyleSheet("QLabel { color: #1d1d1f; font-size: 15px; font-weight: 600; background: transparent; }");
+    overlayLayout->addWidget(overlayTitle);
+
+    QProgressBar *overlayProgress = new QProgressBar(refreshOverlay);
+    overlayProgress->setRange(0, 0);
+    overlayProgress->setFixedWidth(240);
+    overlayProgress->setTextVisible(false);
+    overlayProgress->setStyleSheet("QProgressBar { border: 1px solid #d0d0d7; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #007aff; border-radius: 3px; }");
+    overlayLayout->addWidget(overlayProgress);
+
+    tableStackLayout->addWidget(refreshOverlay);
+    refreshOverlay->hide();
+
+    m_monitorVerticalSplitter->addWidget(tableStack);
     m_specialMonitorPanel = buildSpecialMonitorPanel();
     m_monitorVerticalSplitter->addWidget(m_specialMonitorPanel);
     connect(m_monitorVerticalSplitter, &QSplitter::splitterMoved, this, [this]() {
         m_specialMonitorPanelUserResized = true;
     });
     mainLayout->addWidget(m_monitorVerticalSplitter, 1);
-
-    QPushButton *btn = container->findChild<QPushButton*>("", Qt::FindDirectChildrenOnly);
-    if (btn && btn->property("isMonitorRefreshBtn").toBool()) {
-        connect(btn, &QPushButton::clicked, this, &MainWindow::refreshMonitorAsync);
-    }
+    connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::refreshMonitorAsync);
 
     updateMonitorTableColumns(tree);
     QTimer::singleShot(0, tree, [this, tree]() {
