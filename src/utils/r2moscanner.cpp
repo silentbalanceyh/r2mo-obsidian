@@ -48,11 +48,7 @@ QList<R2moSubProject> R2moScanner::scanVault(const QString& vaultPath)
     mainProject.isParent = true;
     mainProject.taskQueueCount = getTaskQueueCount(r2moPath);
     
-    QList<TaskInfo> tasks = getHistoricalTasks(r2moPath);
-    mainProject.historicalTaskCount = tasks.size();
-    for (const TaskInfo& task : tasks) {
-        mainProject.historicalTasks.append(task.title);
-    }
+    mainProject.historicalTaskCount = getHistoricalTaskCount(r2moPath);
     
     projects.append(mainProject);
     
@@ -85,11 +81,7 @@ QList<R2moSubProject> R2moScanner::scanVault(const QString& vaultPath)
             subProject.isParent = false;
             subProject.taskQueueCount = getTaskQueueCount(subR2moPath);
             
-            QList<TaskInfo> subTasks = getHistoricalTasks(subR2moPath);
-            subProject.historicalTaskCount = subTasks.size();
-            for (const TaskInfo& task : subTasks) {
-                subProject.historicalTasks.append(task.title);
-            }
+            subProject.historicalTaskCount = getHistoricalTaskCount(subR2moPath);
             
             projects.append(subProject);
         }
@@ -177,6 +169,43 @@ QList<TaskInfo> R2moScanner::getHistoricalTasks(const QString& r2moPath)
     });
     
     return tasks;
+}
+
+int R2moScanner::getHistoricalTaskCount(const QString& r2moPath)
+{
+    int count = 0;
+    QRegularExpression dateDirRegex("^\\d{4}-\\d{2}-\\d{2}$");
+
+    auto countDateDirectories = [&](const QString& basePath) {
+        QDir baseDir(basePath);
+        if (!baseDir.exists()) {
+            return;
+        }
+
+        baseDir.setFilter(QDir::Dirs | QDir::NoDotAndDotDot);
+        const QStringList dateDirs = baseDir.entryList();
+        for (const QString& dirName : dateDirs) {
+            if (!dateDirRegex.match(dirName).hasMatch()) {
+                continue;
+            }
+
+            const QString dateDirPath = basePath + "/" + dirName;
+            QDir dateDir(dateDirPath);
+            dateDir.setFilter(QDir::Files | QDir::NoDotAndDotDot);
+            dateDir.setNameFilters(QStringList() << "*.md");
+            const QStringList mdFiles = dateDir.entryList();
+            for (const QString& fileName : mdFiles) {
+                const QString filePath = dateDirPath + "/" + fileName;
+                if (!extractFrontmatterTitle(filePath).isEmpty()) {
+                    ++count;
+                }
+            }
+        }
+    };
+
+    countDateDirectories(r2moPath + "/task");
+    countDateDirectories(r2moPath + "/task/history");
+    return count;
 }
 
 QString R2moScanner::extractTitleFromMd(const QString& filePath)

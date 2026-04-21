@@ -78,7 +78,7 @@ private:
                                   const QString& toolName, const QString& sessionId,
                                   const QString& sessionPath);
     QString identifyToolName(const QString& cmd) const;
-    QByteArray readArtifactTail(const QString& sessionPath, qint64 maxBytes = 524288) const;
+    QByteArray readArtifactTail(const QString& sessionPath, qint64 maxBytes = 131072) const;
     SessionStatus inferArtifactStatus(const QString& toolName, const QString& sessionId,
                                       const QString& sessionPath) const;
     SessionStatus inferCodexArtifactStatus(const QString& sessionPath) const;

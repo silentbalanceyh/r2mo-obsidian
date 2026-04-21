@@ -19,6 +19,7 @@
 #include <QGridLayout>
 #include <QTimer>
 #include <QFutureWatcher>
+#include <QHash>
 #include <QStringList>
 #include "theme/thememanager.h"
 #include "utils/gitscanner.h"
@@ -56,6 +57,26 @@ struct SwimlaneScanData {
     int globalMaxQueue;
 };
 
+struct TimedSwimlaneCache {
+    SwimlaneScanData data;
+    QDateTime capturedAt;
+};
+
+struct TimedGitStatusCache {
+    GitStatusInfo data;
+    QDateTime capturedAt;
+};
+
+struct TimedAIToolCache {
+    QList<AIToolInfo> data;
+    QDateTime capturedAt;
+};
+
+struct TimedSpecialMonitorCache {
+    QList<SpecialMonitorSnapshot> data;
+    QDateTime capturedAt;
+};
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -87,6 +108,13 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
+    struct PreviewProjectCache {
+        QString vaultPath;
+        QList<R2moSubProject> projects;
+        bool hasR2moConfig = false;
+        bool loaded = false;
+    };
+
     void setupMenuBar();
     void setupToolBar();
     void setupCentralWidget();
@@ -115,6 +143,7 @@ private:
     void updateLanguageButtons();
     void updateThemeToggleIcon();
     void updateToolbarIcons();
+    void updateMemoryUsageLabel();
     QIcon createSwimlaneIcon(const QColor &baseColor) const;
     QIcon createMonitorIcon(const QColor &baseColor) const;
     QIcon createHomeIcon(const QColor &baseColor) const;
@@ -124,6 +153,9 @@ private:
     SwimlaneScanData collectSwimlaneData();
     QWidget* buildSwimlaneView(const SwimlaneScanData& data);
     QWidget* buildSwimlaneView();
+    GitStatusInfo cachedGitStatusForPath(const QString& path);
+    QList<AIToolInfo> cachedAIToolsForPath(const QString& path);
+    void pruneScanCaches();
     void openMonitorTab();
     void addMonitorCloseButton(int tabIndex);
     void refreshMonitorAsync();
@@ -131,7 +163,7 @@ private:
     QWidget* buildMonitorView(const QList<ProjectMonitorData>& data);
     QWidget* buildSpecialMonitorPanel();
     void updateSpecialMonitorPanelSizing();
-    void refreshSpecialMonitorAsync();
+    void refreshSpecialMonitorAsync(bool force = true);
     void setSpecialMonitorActionsEnabled(bool enabled);
     void setSpecialMonitorRefreshLoading(bool loading);
     void updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& snapshots);
@@ -152,10 +184,14 @@ private:
     void openMonitorTarget(QTreeWidgetItem *row);
     void invalidateMonitorView(bool refreshIfOpen);
     bool activateTerminalWindow(qint64 pid);
+    void ensurePreviewTabContent(int tabIndex);
+    void clearPreviewTabContent();
+    PreviewProjectCache loadPreviewProjectCache(const QString& vaultPath) const;
 
     // Toolbar
     QToolBar *m_toolBar;
     QPushButton *m_themeBtn;
+    QLabel *m_memoryUsageLabel;
     QButtonGroup *m_langGroup;
     QPushButton *m_btnZh;
     QPushButton *m_btnEn;
@@ -204,6 +240,9 @@ private:
     int m_swimlaneTabIndex;
     QWidget *m_swimlaneView;
     QWidget *m_cachedSwimlaneWidget;
+    TimedSwimlaneCache m_swimlaneDataCache;
+    QHash<QString, TimedGitStatusCache> m_gitStatusCache;
+    QHash<QString, TimedAIToolCache> m_aiToolCache;
     QTimer *m_swimlaneRefreshTimer;
     QFutureWatcher<SwimlaneScanData> *m_swimlaneScanWatcher;
     bool m_swimlaneRefreshing;
@@ -211,6 +250,7 @@ private:
     QLabel *m_loadingProgressLabel;
     int m_loadingProgressStep;
     QString m_currentPreviewPath;
+    PreviewProjectCache m_previewProjectCache;
     int m_monitorTabIndex;
     QWidget *m_monitorView;
     QWidget *m_cachedMonitorWidget;
@@ -219,11 +259,14 @@ private:
     bool m_monitorRefreshing;
     QLabel *m_monitorProgressLabel;
     int m_monitorProgressStep;
+    QTimer *m_memoryUsageTimer;
     QWidget *m_specialMonitorPanel;
     QTableWidget *m_specialMonitorTable;
     QFutureWatcher<QList<SpecialMonitorSnapshot>> *m_specialMonitorScanWatcher;
     bool m_specialMonitorRefreshing;
     QLabel *m_specialMonitorStatusLabel;
+    QTimer *m_specialMonitorRefreshTimer;
+    TimedSpecialMonitorCache m_specialMonitorDataCache;
     QSplitter *m_monitorVerticalSplitter;
     int m_specialMonitorPanelStretchId;
     bool m_specialMonitorPanelUserResized;

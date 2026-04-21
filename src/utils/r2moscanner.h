@@ -13,7 +13,6 @@ struct R2moSubProject {
     bool isParent;
     int taskQueueCount;
     int historicalTaskCount;
-    QList<QString> historicalTasks;  // Task titles
 };
 
 struct TaskInfo {
@@ -37,6 +36,9 @@ public:
     
     // Get historical tasks (md files with title attribute)
     QList<TaskInfo> getHistoricalTasks(const QString& r2moPath);
+
+    // Count historical tasks without loading full task metadata
+    int getHistoricalTaskCount(const QString& r2moPath);
     
     // Get task queue files (task-NNN.md pattern)
     QList<TaskInfo> getTaskQueueFiles(const QString& r2moPath);

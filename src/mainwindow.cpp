@@ -62,6 +62,13 @@
 #include <QPainterPath>
 #include <QRegularExpression>
 #include <QSignalBlocker>
+#include <QStyledItemDelegate>
+#include <QStyleOptionProgressBar>
+#include <QStyleOptionButton>
+#include <QToolTip>
+#ifdef Q_OS_MAC
+#include <mach/mach.h>
+#endif
 
 namespace {
 struct SpecialMonitorProviderOption {
@@ -82,12 +89,249 @@ QString specialMonitorSourceKey(const QString& baseUrl, const QString& tokenKey)
         .arg(SpecialMonitorFetcher::normalizeBaseUrl(baseUrl),
              tokenKey.trimmed());
 }
+
+constexpr int kMonitorProjectPathRole = Qt::UserRole;
+constexpr int kMonitorTerminalNameRole = Qt::UserRole + 1;
+constexpr int kMonitorTerminalPidRole = Qt::UserRole + 2;
+constexpr int kMonitorToolNameRole = Qt::UserRole + 3;
+constexpr int kMonitorDetailRole = Qt::UserRole + 4;
+constexpr int kMonitorSessionPathRole = Qt::UserRole + 5;
+constexpr int kMonitorStatusRole = Qt::UserRole + 6;
+constexpr int kMonitorProjectNameRole = Qt::UserRole + 7;
+constexpr int kMonitorProcessPidRole = Qt::UserRole + 8;
+constexpr int kMonitorSessionIdRole = Qt::UserRole + 9;
+constexpr int kMonitorRowKeyRole = Qt::UserRole + 10;
+constexpr int kMonitorRuntimeRole = Qt::UserRole + 11;
+
+class SwimlaneQueueWidget final : public QWidget
+{
+public:
+    SwimlaneQueueWidget(int maxQueue,
+                        const QList<TaskInfo>& queueTasks,
+                        const QColor& fillColor,
+                        const QColor& borderColor,
+                        const QColor& emptyBorder,
+                        QWidget *parent = nullptr)
+        : QWidget(parent)
+        , m_maxQueue(qMax(1, maxQueue))
+        , m_queueTasks(queueTasks)
+        , m_fillColor(fillColor)
+        , m_borderColor(borderColor)
+        , m_emptyBorder(emptyBorder)
+    {
+        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        setMouseTracking(true);
+        setFixedSize(sizeHint());
+    }
+
+    QSize sizeHint() const override
+    {
+        return {m_maxQueue * 36, 28};
+    }
+
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        Q_UNUSED(event);
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        static constexpr int cellWidth = 36;
+        static constexpr int cellHeight = 24;
+        static constexpr int topInset = 2;
+
+        for (int col = 0; col < m_maxQueue; ++col) {
+            const QRect rect(col * cellWidth + 2, topInset, cellWidth - 4, cellHeight);
+            painter.setPen(QPen(col < m_queueTasks.size() ? m_borderColor : m_emptyBorder, 1.0));
+            painter.setBrush(col < m_queueTasks.size() ? m_fillColor : Qt::transparent);
+            painter.drawRoundedRect(rect, 3, 3);
+        }
+    }
+
+    bool event(QEvent *event) override
+    {
+        if (event->type() == QEvent::ToolTip) {
+            auto *helpEvent = static_cast<QHelpEvent*>(event);
+            static constexpr int cellWidth = 36;
+            const int index = helpEvent->pos().x() / cellWidth;
+            if (index >= 0 && index < m_queueTasks.size()) {
+                const TaskInfo& task = m_queueTasks.at(index);
+                const QString text = task.title.isEmpty() ? task.fileName : task.title;
+                QToolTip::showText(helpEvent->globalPos(), text, this);
+            } else {
+                QToolTip::hideText();
+            }
+            return true;
+        }
+        return QWidget::event(event);
+    }
+
+private:
+    int m_maxQueue;
+    QList<TaskInfo> m_queueTasks;
+    QColor m_fillColor;
+    QColor m_borderColor;
+    QColor m_emptyBorder;
+};
+
+class MonitorTreeDelegate final : public QStyledItemDelegate
+{
+public:
+    explicit MonitorTreeDelegate(QObject *parent = nullptr)
+        : QStyledItemDelegate(parent)
+        , m_animationOffset(0)
+    {
+        if (auto *tree = qobject_cast<QTreeWidget*>(parent)) {
+            auto *timer = new QTimer(this);
+            timer->setInterval(120);
+            connect(timer, &QTimer::timeout, this, [this, tree]() {
+                m_animationOffset = (m_animationOffset + 3) % 24;
+                tree->viewport()->update();
+            });
+            timer->start();
+        }
+    }
+
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override
+    {
+        QSize size = QStyledItemDelegate::sizeHint(option, index);
+        if (index.column() == 4) {
+            size.setWidth(qMax(size.width(), 344));
+            size.setHeight(qMax(size.height(), 30));
+        } else if (index.column() == 5) {
+            size.setWidth(qMax(size.width(), 96));
+            size.setHeight(qMax(size.height(), 30));
+        }
+        return size;
+    }
+
+    void paint(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override
+    {
+        if (index.column() == 4) {
+            paintStatusCell(painter, option, index);
+            return;
+        }
+        if (index.column() == 5) {
+            paintActionCell(painter, option);
+            return;
+        }
+        QStyledItemDelegate::paint(painter, option, index);
+    }
+
+private:
+    static QRect buttonRect(const QStyleOptionViewItem& option)
+    {
+        return QRect(option.rect.right() - 82, option.rect.center().y() - 14, 72, 28);
+    }
+
+    void paintStatusCell(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const
+    {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+
+        const QModelIndex baseIndex = index.sibling(index.row(), 0);
+        const SessionStatus status = static_cast<SessionStatus>(baseIndex.data(kMonitorStatusRole).toInt());
+        const qint64 runtimeSeconds = baseIndex.data(kMonitorRuntimeRole).toLongLong();
+        const QString runtimeText = formatRuntime(runtimeSeconds);
+        const QString statusText = (status == SessionStatus::Working
+                ? QCoreApplication::translate("MainWindow", "Working")
+                : QCoreApplication::translate("MainWindow", "Ready")) +
+            QStringLiteral(" ") + runtimeText;
+
+        const QRect contentRect = option.rect.adjusted(8, 5, -8, -5);
+        const int textWidth = qMax(120, option.fontMetrics.horizontalAdvance(statusText) + 16);
+        const QRect textRect(contentRect.right() - textWidth, contentRect.top(), textWidth, contentRect.height());
+        const QRect barRect(contentRect.left(), contentRect.top(), qMax(120, textRect.left() - contentRect.left() - 10), 12);
+        const QRect centeredBarRect(barRect.left(), contentRect.center().y() - 6, barRect.width(), 12);
+
+        const QColor borderColor = status == SessionStatus::Working ? QColor("#bfe7c8") : QColor("#9bc7ff");
+        const QColor backgroundColor = status == SessionStatus::Working ? QColor("#edf9f0") : QColor("#d9ecff");
+        const QColor fillColor = status == SessionStatus::Working ? QColor("#34c759") : QColor("#4f9cff");
+
+        QPainterPath barPath;
+        barPath.addRoundedRect(centeredBarRect, 6, 6);
+        painter->setPen(QPen(borderColor, 1));
+        painter->setBrush(backgroundColor);
+        painter->drawPath(barPath);
+
+        painter->save();
+        painter->setClipPath(barPath);
+        if (status == SessionStatus::Working) {
+            painter->fillRect(centeredBarRect, fillColor);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor(255, 255, 255, 78));
+            for (int x = centeredBarRect.left() - 24 + m_animationOffset; x < centeredBarRect.right() + 24; x += 24) {
+                QPolygon stripe;
+                stripe << QPoint(x, centeredBarRect.top())
+                       << QPoint(x + 10, centeredBarRect.top())
+                       << QPoint(x + 20, centeredBarRect.bottom())
+                       << QPoint(x + 10, centeredBarRect.bottom());
+                painter->drawPolygon(stripe);
+            }
+        } else {
+            painter->fillRect(centeredBarRect, fillColor);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor(255, 255, 255, 92));
+            for (int x = centeredBarRect.left() + 6; x < centeredBarRect.right(); x += 18) {
+                painter->drawRect(QRect(x, centeredBarRect.top(), 6, centeredBarRect.height()));
+            }
+        }
+        painter->restore();
+
+        painter->setPen(status == SessionStatus::Working ? QColor("#34c759") : QColor("#007aff"));
+        painter->setFont(option.font);
+        painter->drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, statusText);
+        painter->restore();
+    }
+
+    void paintActionCell(QPainter *painter, const QStyleOptionViewItem& option) const
+    {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+
+        QStyleOptionButton button;
+        button.rect = buttonRect(option);
+        button.text = QObject::tr("Goto");
+        button.state = QStyle::State_Enabled;
+        if (option.state & QStyle::State_MouseOver) {
+            button.state |= QStyle::State_MouseOver;
+        }
+
+        QPushButton dummy;
+        dummy.setStyleSheet(
+            "QPushButton { background: #34c759; color: white; font-size: 14px; font-weight: 500; border: none; border-radius: 4px; }"
+            "QPushButton:hover { background: #2db85e; }");
+        dummy.style()->drawControl(QStyle::CE_PushButton, &button, painter, &dummy);
+
+        painter->restore();
+    }
+
+    static QString formatRuntime(qint64 runtimeSeconds)
+    {
+        const qint64 safeSeconds = qMax<qint64>(0, runtimeSeconds);
+        const qint64 hours = safeSeconds / 3600;
+        const qint64 minutes = (safeSeconds % 3600) / 60;
+        const qint64 seconds = safeSeconds % 60;
+        if (hours > 0) {
+            return QStringLiteral("%1:%2:%3")
+                .arg(hours)
+                .arg(minutes, 2, 10, QChar('0'))
+                .arg(seconds, 2, 10, QChar('0'));
+        }
+        return QStringLiteral("%1:%2")
+            .arg(minutes, 2, 10, QChar('0'))
+            .arg(seconds, 2, 10, QChar('0'));
+    }
+
+    int m_animationOffset;
+};
 }
 
 MainWindow::MainWindow(QWidget *parent)
      : QMainWindow(parent)
      , m_toolBar(nullptr)
      , m_themeBtn(nullptr)
+     , m_memoryUsageLabel(nullptr)
      , m_langGroup(nullptr)
      , m_btnZh(nullptr)
      , m_btnEn(nullptr)
@@ -142,11 +386,13 @@ MainWindow::MainWindow(QWidget *parent)
       , m_monitorRefreshing(false)
       , m_monitorProgressLabel(nullptr)
       , m_monitorProgressStep(0)
+      , m_memoryUsageTimer(nullptr)
       , m_specialMonitorPanel(nullptr)
       , m_specialMonitorTable(nullptr)
       , m_specialMonitorScanWatcher(nullptr)
       , m_specialMonitorRefreshing(false)
       , m_specialMonitorStatusLabel(nullptr)
+      , m_specialMonitorRefreshTimer(nullptr)
       , m_monitorVerticalSplitter(nullptr)
       , m_specialMonitorPanelStretchId(0)
       , m_specialMonitorPanelUserResized(false)
@@ -326,6 +572,13 @@ void MainWindow::setupToolBar()
     updateThemeToggleIcon();
     connect(m_themeBtn, &QPushButton::clicked, this, &MainWindow::onThemeToggle);
     rightLayout->addWidget(m_themeBtn);
+
+    m_memoryUsageLabel = new QLabel();
+    m_memoryUsageLabel->setObjectName("memoryUsageLabel");
+    m_memoryUsageLabel->setMinimumWidth(96);
+    m_memoryUsageLabel->setAlignment(Qt::AlignCenter);
+    m_memoryUsageLabel->setStyleSheet("QLabel#memoryUsageLabel { color: #86868b; font-size: 13px; padding: 0 8px; min-height: 28px; background: #f5f5f7; border: 1px solid #d7d7dc; border-radius: 6px; }");
+    rightLayout->addWidget(m_memoryUsageLabel);
     
     // Language button group container (中|En as segmented control)
     QWidget *langGroupWidget = new QWidget();
@@ -407,6 +660,31 @@ void MainWindow::updateToolbarIcons()
     if (homeIdx >= 0) {
         m_mainTabWidget->setTabIcon(homeIdx, createHomeIcon(baseColor));
     }
+}
+
+void MainWindow::updateMemoryUsageLabel()
+{
+    if (!m_memoryUsageLabel) {
+        return;
+    }
+
+    double rssMb = 0.0;
+#ifdef Q_OS_MAC
+    mach_task_basic_info_data_t info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count) == KERN_SUCCESS) {
+        rssMb = static_cast<double>(info.resident_size) / (1024.0 * 1024.0);
+    }
+#endif
+
+    if (rssMb <= 0.0) {
+        m_memoryUsageLabel->setText(tr("Memory --"));
+        m_memoryUsageLabel->setToolTip(tr("Current app RSS memory"));
+        return;
+    }
+
+    m_memoryUsageLabel->setText(tr("Memory %1M").arg(QString::number(rssMb, 'f', rssMb >= 100.0 ? 0 : 1)));
+    m_memoryUsageLabel->setToolTip(tr("Current app RSS memory"));
 }
 
 QIcon MainWindow::createSwimlaneIcon(const QColor &baseColor) const
@@ -853,6 +1131,27 @@ void MainWindow::setupCentralWidget()
     
     m_swimlaneTabContent = nullptr;
     m_monitorTabContent = nullptr;
+
+    connect(m_mainTabWidget, &QTabWidget::currentChanged, this, [this](int index) {
+        QWidget *current = index >= 0 ? m_mainTabWidget->widget(index) : nullptr;
+        const bool swimlaneVisible = current && current == m_swimlaneTabContent;
+        const bool monitorVisible = current && current == m_monitorTabContent;
+
+        if (m_swimlaneRefreshTimer) {
+            if (swimlaneVisible) {
+                m_swimlaneRefreshTimer->start();
+            } else {
+                m_swimlaneRefreshTimer->stop();
+            }
+        }
+        if (m_monitorRefreshTimer) {
+            if (monitorVisible) {
+                m_monitorRefreshTimer->start();
+            } else {
+                m_monitorRefreshTimer->stop();
+            }
+        }
+    });
     
     mainLayout->addWidget(m_mainTabWidget, 1);
 
@@ -875,6 +1174,7 @@ void MainWindow::setupConnections()
     connect(m_previewOpenBtn, &QPushButton::clicked, this, &MainWindow::onPreviewOpenClicked);
     connect(m_previewTitleEdit, &QLineEdit::editingFinished, this, &MainWindow::onPreviewTitleEditFinished);
     connect(m_previewTitleEdit, &QLineEdit::returnPressed, this, &MainWindow::onPreviewTitleReturnPressed);
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::ensurePreviewTabContent);
     connect(m_taskTree, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onTaskItemDoubleClicked);
     connect(m_aiToolsTree, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onAIToolItemDoubleClicked);
     connect(m_vaultModel, &VaultModel::modelChanged, this, &MainWindow::updateVaultList);
@@ -886,7 +1186,7 @@ void MainWindow::setupConnections()
     m_swimlaneRefreshTimer = new QTimer(this);
     m_swimlaneRefreshTimer->setInterval(10000);
     connect(m_swimlaneRefreshTimer, &QTimer::timeout, this, &MainWindow::onSwimlaneRefresh);
-    m_swimlaneRefreshTimer->start(); // Start immediately on app launch
+    m_swimlaneRefreshTimer->stop();
     
     // Loading progress animation timer
     m_loadingProgressTimer = new QTimer(this);
@@ -906,11 +1206,17 @@ void MainWindow::setupConnections()
         }
     });
     
-    // Monitor refresh timer (15 seconds)
+    // Monitor refresh timer (10 seconds)
     m_monitorRefreshTimer = new QTimer(this);
-    m_monitorRefreshTimer->setInterval(2000);
+    m_monitorRefreshTimer->setInterval(10000);
     connect(m_monitorRefreshTimer, &QTimer::timeout, this, &MainWindow::onMonitorRefresh);
-    m_monitorRefreshTimer->start();
+    m_monitorRefreshTimer->stop();
+
+    m_memoryUsageTimer = new QTimer(this);
+    m_memoryUsageTimer->setInterval(1500);
+    connect(m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsageLabel);
+    m_memoryUsageTimer->start();
+    updateMemoryUsageLabel();
     
     // Monitor scan watcher for async refresh
     m_monitorScanWatcher = new QFutureWatcher<QList<ProjectMonitorData>>(this);
@@ -930,12 +1236,21 @@ void MainWindow::setupConnections()
     m_specialMonitorScanWatcher = new QFutureWatcher<QList<SpecialMonitorSnapshot>>(this);
     connect(m_specialMonitorScanWatcher, &QFutureWatcher<QList<SpecialMonitorSnapshot>>::finished, this, [this]() {
         if (m_specialMonitorRefreshing) {
-            updateSpecialMonitorTable(m_specialMonitorScanWatcher->result());
+            m_specialMonitorDataCache.data = m_specialMonitorScanWatcher->result();
+            m_specialMonitorDataCache.capturedAt = QDateTime::currentDateTime();
+            updateSpecialMonitorTable(m_specialMonitorDataCache.data);
             setSpecialMonitorActionsEnabled(true);
             setSpecialMonitorRefreshLoading(false);
             m_specialMonitorRefreshing = false;
         }
     });
+
+    m_specialMonitorRefreshTimer = new QTimer(this);
+    m_specialMonitorRefreshTimer->setInterval(5 * 60 * 1000);
+    connect(m_specialMonitorRefreshTimer, &QTimer::timeout, this, [this]() {
+        refreshSpecialMonitorAsync(false);
+    });
+    m_specialMonitorRefreshTimer->stop();
     
     // Swimlane scan watcher for async refresh
     m_swimlaneScanWatcher = new QFutureWatcher<SwimlaneScanData>(this);
@@ -947,7 +1262,9 @@ void MainWindow::setupConnections()
             SwimlaneScanData data = m_swimlaneScanWatcher->result();
             QWidget *newWidget = buildSwimlaneView(data);
             
-            // Always update cache with fresh data
+            if (m_cachedSwimlaneWidget && m_cachedSwimlaneWidget != m_swimlaneTabContent && m_cachedSwimlaneWidget != newWidget) {
+                m_cachedSwimlaneWidget->deleteLater();
+            }
             m_cachedSwimlaneWidget = newWidget;
             
             // Update visible tab if showing swimlane
@@ -1301,7 +1618,7 @@ void MainWindow::onAddVault()
     
     // Info label
     QLabel* infoLabel = new QLabel(tr("📁 = Obsidian vault  |  📂 = Directory for monitoring  |  ● Open = Currently open in Obsidian"));
-    infoLabel->setStyleSheet("color: #86868b; font-size: 12px;");
+    infoLabel->setStyleSheet("color: #86868b; font-size: 14px;");
     layout->addWidget(infoLabel);
     
     // Buttons
@@ -1598,7 +1915,7 @@ void MainWindow::onSettings()
     }
 }
 
-void MainWindow::refreshSpecialMonitorAsync()
+void MainWindow::refreshSpecialMonitorAsync(bool force)
 {
     if (m_specialMonitorRefreshing) {
         return;
@@ -1606,7 +1923,16 @@ void MainWindow::refreshSpecialMonitorAsync()
 
     const QList<SpecialMonitorSource> sources = m_settingsManager->specialMonitorSources();
     if (sources.isEmpty()) {
+        m_specialMonitorDataCache = TimedSpecialMonitorCache{};
         updateSpecialMonitorTable({});
+        return;
+    }
+
+    const int specialMonitorCacheTtlSeconds = 5 * 60;
+    if (!force &&
+        m_specialMonitorDataCache.capturedAt.isValid() &&
+        m_specialMonitorDataCache.capturedAt.secsTo(QDateTime::currentDateTime()) < specialMonitorCacheTtlSeconds) {
+        updateSpecialMonitorTable(m_specialMonitorDataCache.data);
         return;
     }
 
@@ -1864,7 +2190,9 @@ QWidget* MainWindow::buildSpecialMonitorPanel()
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::addSpecialMonitorSource);
     connect(editBtn, &QPushButton::clicked, this, &MainWindow::editSpecialMonitorSource);
     connect(removeBtn, &QPushButton::clicked, this, &MainWindow::removeSpecialMonitorSource);
-    connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::refreshSpecialMonitorAsync);
+    connect(refreshBtn, &QPushButton::clicked, this, [this]() {
+        refreshSpecialMonitorAsync(true);
+    });
     headerLayout->addWidget(addBtn);
     headerLayout->addWidget(editBtn);
     headerLayout->addWidget(removeBtn);
@@ -2042,7 +2370,7 @@ void MainWindow::addSpecialMonitorSource()
     source.providerName = providerCombo->currentText();
     sources.append(source);
     m_settingsManager->setSpecialMonitorSources(sources);
-    refreshSpecialMonitorAsync();
+    refreshSpecialMonitorAsync(true);
 }
 
 void MainWindow::editSpecialMonitorSource()
@@ -2119,7 +2447,7 @@ void MainWindow::editSpecialMonitorSource()
     source.providerName = providerCombo->currentText();
     sources[row] = source;
     m_settingsManager->setSpecialMonitorSources(sources);
-    refreshSpecialMonitorAsync();
+    refreshSpecialMonitorAsync(true);
 }
 
 void MainWindow::removeSpecialMonitorSource()
@@ -2134,7 +2462,7 @@ void MainWindow::removeSpecialMonitorSource()
     }
     sources.removeAt(row);
     m_settingsManager->setSpecialMonitorSources(sources);
-    refreshSpecialMonitorAsync();
+    refreshSpecialMonitorAsync(true);
 }
 
 void MainWindow::updatePreviewPane(const QString& name, const QString& path)
@@ -2149,13 +2477,11 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
     m_previewOpenBtn->setVisible(hasObsidian);
     m_previewTitleEdit->hide();
     
-    // Clear previous content
-    m_graphScene->clear();
-    m_taskTree->clear();
+    clearPreviewTabContent();
     if (path.trimmed().isEmpty()) {
         m_overviewEmptyLabel->setText(tr("Select a vault to view details..."));
         setOverviewEmptyState(true);
-        buildAIToolsTab(QString());
+        m_previewProjectCache = PreviewProjectCache{};
         return;
     }
 
@@ -2163,9 +2489,7 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
         m_overviewEmptyLabel->setText(tr("No Obsidian configuration found for this project."));
         setOverviewEmptyState(true);
         m_r2moStatsCard->setVisible(false);
-        m_graphScene->clear();
-        m_taskTree->clear();
-        buildAIToolsTab(QString());
+        m_previewProjectCache = PreviewProjectCache{};
         return;
     }
 
@@ -2207,13 +2531,11 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
             addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Obsidian"), tr("✓ Valid Vault"), "#34c759");
         }
         
+        m_previewProjectCache = loadPreviewProjectCache(path);
+
         // Check for .r2mo folder and show detailed info
-        if (m_vaultValidator->hasR2moConfig(path)) {
-            // Scan for R2MO projects
-            R2moScanner scanner;
-            QList<R2moSubProject> projects = scanner.scanVault(path);
-            
-            if (!projects.isEmpty()) {
+        if (m_previewProjectCache.hasR2moConfig && !m_previewProjectCache.projects.isEmpty()) {
+            const QList<R2moSubProject>& projects = m_previewProjectCache.projects;
                 // Calculate totals
                 int totalQueue = 0;
                 int totalHistorical = 0;
@@ -2228,24 +2550,80 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
                 addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Total Projects"), QString::number(projects.size()));
                 addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Task Queue"), QString("%1 %2").arg(totalQueue).arg(tr("pending")), "#ff9500");
                 addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Historical Tasks"), QString("%1 %2").arg(totalHistorical).arg(tr("completed")), "#34c759");
-                
-                // Draw directed graph for project relationships (in Graph tab)
-                drawProjectGraph(projects);
-                
-                // Build expandable task tree (in Tasks tab)
-                buildTaskTree(projects);
-            }
-            m_r2moStatsCard->setVisible(!projects.isEmpty());
+            m_r2moStatsCard->setVisible(true);
         } else {
             m_r2moStatsCard->setVisible(false);
         }
-        
-        // Build AI Tools tab
-        buildAIToolsTab(path);
+
+        ensurePreviewTabContent(m_tabWidget->currentIndex());
     } else {
         addOverviewRow(m_vaultStatsGrid, 0, tr("Warning"), tr("Path does not exist"), "#ff3b30");
         m_r2moStatsCard->setVisible(false);
-        buildAIToolsTab(QString());
+        m_previewProjectCache = PreviewProjectCache{};
+    }
+}
+
+MainWindow::PreviewProjectCache MainWindow::loadPreviewProjectCache(const QString& vaultPath) const
+{
+    PreviewProjectCache cache;
+    cache.vaultPath = vaultPath;
+    cache.hasR2moConfig = m_vaultValidator->hasR2moConfig(vaultPath);
+    cache.loaded = true;
+    if (!cache.hasR2moConfig) {
+        return cache;
+    }
+
+    R2moScanner scanner;
+    cache.projects = scanner.scanVault(vaultPath);
+    return cache;
+}
+
+void MainWindow::clearPreviewTabContent()
+{
+    if (m_graphScene) {
+        m_graphScene->clear();
+    }
+    if (m_taskTree) {
+        m_taskTree->clear();
+    }
+    if (m_aiToolsTree) {
+        m_aiToolsTree->clear();
+        m_aiToolsTree->setVisible(false);
+    }
+    if (m_aiToolsEmptyLabel) {
+        m_aiToolsEmptyLabel->setVisible(true);
+    }
+}
+
+void MainWindow::ensurePreviewTabContent(int tabIndex)
+{
+    if (m_currentPreviewPath.trimmed().isEmpty()) {
+        return;
+    }
+
+    if (!m_previewProjectCache.loaded || m_previewProjectCache.vaultPath != m_currentPreviewPath) {
+        m_previewProjectCache = loadPreviewProjectCache(m_currentPreviewPath);
+    }
+
+    if (tabIndex == 1) {
+        if (m_taskTree && m_taskTree->topLevelItemCount() == 0 && !m_previewProjectCache.projects.isEmpty()) {
+            buildTaskTree(m_previewProjectCache.projects);
+        }
+        return;
+    }
+
+    if (tabIndex == 2) {
+        if (m_graphScene && m_graphScene->items().isEmpty() && !m_previewProjectCache.projects.isEmpty()) {
+            drawProjectGraph(m_previewProjectCache.projects);
+        }
+        return;
+    }
+
+    if (tabIndex == 3) {
+        const bool aiTreeEmpty = m_aiToolsTree && m_aiToolsTree->topLevelItemCount() == 0;
+        if (aiTreeEmpty) {
+            buildAIToolsTab(m_currentPreviewPath);
+        }
     }
 }
 
@@ -2789,16 +3167,22 @@ void MainWindow::addSwimlaneCloseButton(int tabIndex)
 {
     QToolButton *closeBtn = new QToolButton();
     closeBtn->setText("×");
-    closeBtn->setFixedSize(QSize(14, 14));
+    closeBtn->setFixedSize(QSize(18, 18));
     closeBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     closeBtn->setCursor(Qt::PointingHandCursor);
-    closeBtn->setStyleSheet("QToolButton { background: transparent; color: #86868b; font-size: 12px; font-weight: bold; border: none; padding: 0; margin: 0; margin-right: 4px; } QToolButton:hover { background: #ff3b30; color: white; border-radius: 2px; }");
+    closeBtn->setStyleSheet("QToolButton { background: transparent; color: #86868b; font-size: 14px; font-weight: bold; border: none; padding: 0; margin: 0; margin-right: 4px; } QToolButton:hover { background: #ff3b30; color: white; border-radius: 2px; }");
     connect(closeBtn, &QToolButton::clicked, this, [this]() {
         int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
         if (idx > 0) {
             m_mainTabWidget->removeTab(idx);
-            m_cachedSwimlaneWidget = m_swimlaneTabContent;
+            if (m_cachedSwimlaneWidget && m_cachedSwimlaneWidget != m_swimlaneTabContent) {
+                m_cachedSwimlaneWidget->deleteLater();
+            }
+            m_cachedSwimlaneWidget = nullptr;
             m_swimlaneTabContent = nullptr;
+            if (m_swimlaneRefreshTimer) {
+                m_swimlaneRefreshTimer->stop();
+            }
         }
     });
     m_mainTabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeBtn);
@@ -2811,6 +3195,9 @@ void MainWindow::onSwimlane()
         int idx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
         addSwimlaneCloseButton(idx);
         m_mainTabWidget->setCurrentIndex(idx);
+        if (m_swimlaneRefreshTimer) {
+            m_swimlaneRefreshTimer->start();
+        }
         return;
     }
 
@@ -2853,7 +3240,7 @@ void MainWindow::onSwimlane()
     // Hint text
     QLabel *hintLabel = new QLabel(tr("Scanning Git repositories, AI tools, and task queues..."));
     hintLabel->setAlignment(Qt::AlignCenter);
-    hintLabel->setStyleSheet("QLabel { color: #86868b; font-size: 12px; background: transparent; }");
+    hintLabel->setStyleSheet("QLabel { color: #86868b; font-size: 14px; background: transparent; }");
     loadingLayout->addWidget(hintLabel);
     
     m_swimlaneTabContent = loadingWidget;
@@ -2883,58 +3270,17 @@ QWidget* MainWindow::buildSwimlaneView()
 
 SwimlaneScanData MainWindow::collectSwimlaneData()
 {
+    pruneScanCaches();
+    const int swimlaneCacheTtlSeconds = 30;
+    if (m_swimlaneDataCache.capturedAt.isValid() &&
+        m_swimlaneDataCache.capturedAt.secsTo(QDateTime::currentDateTime()) < swimlaneCacheTtlSeconds) {
+        return m_swimlaneDataCache.data;
+    }
+
     SwimlaneScanData result;
     result.globalMaxQueue = 0;
     
     QList<Vault> vaults = m_vaultModel->vaults();
-    
-    // Cache Git scan results by actual repo path to avoid duplicate scans
-    QMap<QString, GitStatusInfo> gitCache;
-    
-    auto getCachedGitStatus = [&](const QString& path) -> GitStatusInfo {
-        // Find actual git repo root
-        QString actualRepoPath = path;
-        QDir dir(path);
-        if (!dir.exists()) {
-            GitStatusInfo empty;
-            empty.isGitRepo = false;
-            return empty;
-        }
-        
-        QString gitDir = path + "/.git";
-        if (!QDir(gitDir).exists()) {
-            QDir checkDir(path);
-            while (checkDir.cdUp()) {
-                if (QDir(checkDir.path() + "/.git").exists()) {
-                    actualRepoPath = checkDir.path();
-                    break;
-                }
-                if (checkDir.isRoot()) break;
-            }
-        }
-        
-        if (gitCache.contains(actualRepoPath)) {
-            return gitCache[actualRepoPath];
-        }
-        
-        GitScanner gitScanner;
-        GitStatusInfo status = gitScanner.scanRepository(path);
-        gitCache[actualRepoPath] = status;
-        return status;
-    };
-    
-    // Cache AI tool scan results by project path
-    QMap<QString, QList<AIToolInfo>> aiCache;
-    
-    auto getCachedAITools = [&](const QString& path) -> QList<AIToolInfo> {
-        if (aiCache.contains(path)) {
-            return aiCache[path];
-        }
-        AIToolScanner aiScanner;
-        QList<AIToolInfo> tools = aiScanner.scanProject(path);
-        aiCache[path] = tools;
-        return tools;
-    };
     
     for (const Vault& vault : vaults) {
         QDir vaultDir(vault.path);
@@ -2957,12 +3303,12 @@ SwimlaneScanData MainWindow::collectSwimlaneData()
         vd.vaultName = vault.name;
         vd.vaultPath = vault.path;
         
-        vd.gitStatus = getCachedGitStatus(vault.path);
+        vd.gitStatus = cachedGitStatusForPath(vault.path);
         
         QSet<QString> scannedTools;
         QList<AIToolInfo> allAiTools;
         
-        QList<AIToolInfo> rootTools = getCachedAITools(vault.path);
+        QList<AIToolInfo> rootTools = cachedAIToolsForPath(vault.path);
         for (const AIToolInfo& tool : rootTools) {
             if (!scannedTools.contains(tool.name)) {
                 allAiTools.append(tool);
@@ -2970,7 +3316,7 @@ SwimlaneScanData MainWindow::collectSwimlaneData()
             }
         }
         
-        QList<AIToolInfo> parentTools = getCachedAITools(parent->path);
+        QList<AIToolInfo> parentTools = cachedAIToolsForPath(parent->path);
         for (const AIToolInfo& tool : parentTools) {
             if (!scannedTools.contains(tool.name)) {
                 allAiTools.append(tool);
@@ -2979,7 +3325,7 @@ SwimlaneScanData MainWindow::collectSwimlaneData()
         }
         
         for (const R2moSubProject* child : children) {
-            QList<AIToolInfo> childTools = getCachedAITools(child->path);
+            QList<AIToolInfo> childTools = cachedAIToolsForPath(child->path);
             for (const AIToolInfo& tool : childTools) {
                 if (!scannedTools.contains(tool.name)) {
                     allAiTools.append(tool);
@@ -2995,9 +3341,9 @@ SwimlaneScanData MainWindow::collectSwimlaneData()
         parentRow.projectPath = parent->path;
         parentRow.isParent = true;
         parentRow.r2moPath = parent->path + "/.r2mo";
-        parentRow.historicalCount = scanner.getHistoricalTasks(parent->path + "/.r2mo").size();
+        parentRow.historicalCount = scanner.getHistoricalTaskCount(parent->path + "/.r2mo");
         parentRow.queueTasks = scanner.getTaskQueueFiles(parent->path + "/.r2mo");
-        parentRow.gitStatus = getCachedGitStatus(parent->path);
+        parentRow.gitStatus = cachedGitStatusForPath(parent->path);
         if (parentRow.queueTasks.size() > result.globalMaxQueue)
             result.globalMaxQueue = parentRow.queueTasks.size();
 
@@ -3007,9 +3353,9 @@ SwimlaneScanData MainWindow::collectSwimlaneData()
             childRow.projectPath = child->path;
             childRow.isParent = false;
             childRow.r2moPath = child->path + "/.r2mo";
-            childRow.historicalCount = scanner.getHistoricalTasks(child->path + "/.r2mo").size();
+            childRow.historicalCount = scanner.getHistoricalTaskCount(child->path + "/.r2mo");
             childRow.queueTasks = scanner.getTaskQueueFiles(child->path + "/.r2mo");
-            childRow.gitStatus = getCachedGitStatus(child->path);
+            childRow.gitStatus = cachedGitStatusForPath(child->path);
             if (childRow.queueTasks.size() > result.globalMaxQueue)
                 result.globalMaxQueue = childRow.queueTasks.size();
             parentRow.children.append(childRow);
@@ -3018,6 +3364,8 @@ SwimlaneScanData MainWindow::collectSwimlaneData()
         result.vaults.append(vd);
     }
     
+    m_swimlaneDataCache.data = result;
+    m_swimlaneDataCache.capturedAt = QDateTime::currentDateTime();
     return result;
 }
 
@@ -3041,7 +3389,7 @@ QWidget* MainWindow::buildSwimlaneView(const SwimlaneScanData& scanData)
     // Legend + Refresh button
     QHBoxLayout *legendLayout = new QHBoxLayout();
     QLabel *legendLabel = new QLabel(tr("Running Tasks"));
-    legendLabel->setStyleSheet("QLabel { color: #86868b; font-size: 11px; background: white; }");
+    legendLabel->setStyleSheet("QLabel { color: #86868b; font-size: 14px; background: white; }");
     legendLayout->addWidget(legendLabel);
     
     QPushButton *refreshBtn = new QPushButton(tr("Refresh"));
@@ -3135,17 +3483,14 @@ QWidget* MainWindow::buildSwimlaneView(const SwimlaneScanData& scanData)
             grid->addWidget(emptyHist, row, 1);
         }
 
-        for (int col = 0; col < gridColCount; ++col) {
-            QFrame *cell = new QFrame();
-            cell->setFixedSize(cellWidth, cellHeight);
-            if (col < queueTasks.size()) {
-                cell->setStyleSheet(QString("QFrame { background: %1; border: 1px solid %2; border-radius: 3px; margin: 1px; }").arg(runningColor.name()).arg(runningColor.darker(120).name()));
-                cell->setToolTip(queueTasks[col].title.isEmpty() ? queueTasks[col].fileName : queueTasks[col].title);
-            } else {
-                cell->setStyleSheet(QString("QFrame { background: transparent; border: 1px solid %1; border-radius: 3px; margin: 1px; }").arg(emptyBorder.name()));
-            }
-            grid->addWidget(cell, row, col + 2);
-        }
+        SwimlaneQueueWidget *queueWidget = new SwimlaneQueueWidget(
+            gridColCount,
+            queueTasks,
+            runningColor,
+            runningColor.darker(120),
+            emptyBorder,
+            grid->parentWidget());
+        grid->addWidget(queueWidget, row, 2, 1, gridColCount);
     };
 
     for (const SwimlaneVaultData &vd : allVaultData) {
@@ -3176,7 +3521,7 @@ QWidget* MainWindow::buildSwimlaneView(const SwimlaneScanData& scanData)
             toolLayout->addWidget(iconLabel);
             
             QLabel *countLabel = new QLabel(QString::number(tool.sessions.count));
-            countLabel->setStyleSheet("QLabel { color: #86868b; font-size: 12px; background: transparent; border: none; }");
+            countLabel->setStyleSheet("QLabel { color: #86868b; font-size: 14px; background: transparent; border: none; }");
             toolLayout->addWidget(countLabel);
             
             toolWidget->setToolTip(QString("%1: %2 sessions").arg(tool.name).arg(tool.sessions.count));
@@ -3253,7 +3598,7 @@ QWidget* MainWindow::buildSwimlaneView(const SwimlaneScanData& scanData)
             QLabel *colH = new QLabel(QString("#%1").arg(col + 1));
             colH->setAlignment(Qt::AlignCenter);
             colH->setFixedSize(cellWidth, 24);
-            colH->setStyleSheet(QString("QLabel { color: %1; font-size: 12px; font-weight: 600; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
+            colH->setStyleSheet(QString("QLabel { color: %1; font-size: 14px; font-weight: 600; background: %2; border-bottom: 1px solid %3; }").arg(textColor.name()).arg(headerBg.name()).arg(borderColor.name()));
             grid->addWidget(colH, 0, col + 2);
         }
 
@@ -3287,6 +3632,8 @@ void MainWindow::refreshSwimlaneAsync()
 {
     if (m_swimlaneRefreshing) return;
     if (!m_swimlaneTabContent) return;
+
+    m_swimlaneDataCache = TimedSwimlaneCache{};
     
     int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
     if (idx < 0) return;
@@ -3326,7 +3673,10 @@ void MainWindow::refreshSwimlaneAsync()
     progressBar->setStyleSheet("QProgressBar { border: 1px solid #e0e0e0; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #007aff; border-radius: 3px; }");
     overlayLayout->addWidget(progressBar);
     
-    m_cachedSwimlaneWidget = m_swimlaneTabContent;
+    if (m_cachedSwimlaneWidget && m_cachedSwimlaneWidget != m_swimlaneTabContent) {
+        m_cachedSwimlaneWidget->deleteLater();
+    }
+    m_cachedSwimlaneWidget = nullptr;
     m_mainTabWidget->removeTab(idx);
     m_swimlaneTabContent = loadingOverlay;
     int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
@@ -3472,6 +3822,21 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         if (tree->property("isMonitorTree").toBool() &&
             (event->type() == QEvent::Resize || event->type() == QEvent::Show || event->type() == QEvent::LayoutRequest)) {
             updateMonitorTableColumns(tree);
+        }
+    }
+
+    if (watched->property("isMonitorTreeViewport").toBool() && event->type() == QEvent::MouseButtonRelease) {
+        auto *mouseEvent = static_cast<QMouseEvent*>(event);
+        if (mouseEvent->button() == Qt::LeftButton) {
+            if (QTreeWidget *tree = qobject_cast<QTreeWidget*>(watched->parent())) {
+                const QModelIndex index = tree->indexAt(mouseEvent->pos());
+                if (index.isValid() && index.column() == 5) {
+                    if (QTreeWidgetItem *item = tree->itemFromIndex(index)) {
+                        openMonitorTarget(item);
+                        return true;
+                    }
+                }
+            }
         }
     }
 
@@ -3695,16 +4060,22 @@ void MainWindow::addMonitorCloseButton(int tabIndex)
 {
     QToolButton *closeBtn = new QToolButton();
     closeBtn->setText("×");
-    closeBtn->setFixedSize(QSize(14, 14));
+    closeBtn->setFixedSize(QSize(18, 18));
     closeBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     closeBtn->setCursor(Qt::PointingHandCursor);
-    closeBtn->setStyleSheet("QToolButton { background: transparent; color: #86868b; font-size: 12px; font-weight: bold; border: none; padding: 0; margin: 0; margin-right: 4px; } QToolButton:hover { background: #ff3b30; color: white; border-radius: 2px; }");
+    closeBtn->setStyleSheet("QToolButton { background: transparent; color: #86868b; font-size: 14px; font-weight: bold; border: none; padding: 0; margin: 0; margin-right: 4px; } QToolButton:hover { background: #ff3b30; color: white; border-radius: 2px; }");
     connect(closeBtn, &QToolButton::clicked, this, [this]() {
         int idx = m_mainTabWidget->indexOf(m_monitorTabContent);
         if (idx > 0) {
             m_mainTabWidget->removeTab(idx);
-            m_cachedMonitorWidget = m_monitorTabContent;
+            if (m_cachedMonitorWidget && m_cachedMonitorWidget != m_monitorTabContent) {
+                m_cachedMonitorWidget->deleteLater();
+            }
+            m_cachedMonitorWidget = nullptr;
             m_monitorTabContent = nullptr;
+            if (m_monitorRefreshTimer) {
+                m_monitorRefreshTimer->stop();
+            }
         }
     });
     m_mainTabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeBtn);
@@ -3754,6 +4125,9 @@ void MainWindow::onMonitorBoard()
         int idx = m_mainTabWidget->addTab(m_monitorTabContent, tr("Monitor Board"));
         addMonitorCloseButton(idx);
         m_mainTabWidget->setCurrentIndex(idx);
+        if (m_monitorRefreshTimer) {
+            m_monitorRefreshTimer->start();
+        }
         return;
     }
     
@@ -3834,11 +4208,16 @@ void MainWindow::openMonitorTarget(QTreeWidgetItem *row)
     }
 
     const qint64 terminalPid = row->data(0, Qt::UserRole + 2).toLongLong();
-    if (terminalPid > 0 && activateTerminalWindow(terminalPid)) {
+    const qint64 fallbackPid = row->data(0, kMonitorTerminalPidRole).toLongLong();
+    const qint64 resolvedTerminalPid = terminalPid > 0 ? terminalPid : fallbackPid;
+    if (resolvedTerminalPid > 0 && activateTerminalWindow(resolvedTerminalPid)) {
         return;
     }
 
-    const QString projectPath = row->data(0, Qt::UserRole).toString();
+    QString projectPath = row->data(0, Qt::UserRole).toString();
+    if (projectPath.isEmpty()) {
+        projectPath = row->data(0, kMonitorProjectPathRole).toString();
+    }
     if (projectPath.isEmpty()) {
         return;
     }
@@ -3921,12 +4300,74 @@ QString MainWindow::formatSessionRuntime(qint64 runtimeSeconds) const
         .arg(seconds, 2, 10, QChar('0'));
 }
 
+GitStatusInfo MainWindow::cachedGitStatusForPath(const QString& path)
+{
+    const QString normalizedPath = QDir::cleanPath(path);
+    const QDateTime now = QDateTime::currentDateTime();
+    constexpr int gitCacheTtlSeconds = 30;
+
+    const auto it = m_gitStatusCache.constFind(normalizedPath);
+    if (it != m_gitStatusCache.cend() &&
+        it->capturedAt.isValid() &&
+        it->capturedAt.secsTo(now) < gitCacheTtlSeconds) {
+        return it->data;
+    }
+
+    GitScanner gitScanner;
+    TimedGitStatusCache entry;
+    entry.data = gitScanner.scanRepository(path);
+    entry.capturedAt = now;
+    m_gitStatusCache.insert(normalizedPath, entry);
+    return entry.data;
+}
+
+QList<AIToolInfo> MainWindow::cachedAIToolsForPath(const QString& path)
+{
+    const QString normalizedPath = QDir::cleanPath(path);
+    const QDateTime now = QDateTime::currentDateTime();
+    constexpr int aiCacheTtlSeconds = 30;
+
+    const auto it = m_aiToolCache.constFind(normalizedPath);
+    if (it != m_aiToolCache.cend() &&
+        it->capturedAt.isValid() &&
+        it->capturedAt.secsTo(now) < aiCacheTtlSeconds) {
+        return it->data;
+    }
+
+    AIToolScanner aiScanner;
+    TimedAIToolCache entry;
+    entry.data = aiScanner.scanProject(path);
+    entry.capturedAt = now;
+    m_aiToolCache.insert(normalizedPath, entry);
+    return entry.data;
+}
+
+void MainWindow::pruneScanCaches()
+{
+    const QDateTime now = QDateTime::currentDateTime();
+    auto pruneExpired = [&now](auto &cache, int ttlSeconds) {
+        for (auto it = cache.begin(); it != cache.end();) {
+            if (!it->capturedAt.isValid() || it->capturedAt.secsTo(now) >= ttlSeconds) {
+                it = cache.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    };
+
+    pruneExpired(m_gitStatusCache, 30);
+    pruneExpired(m_aiToolCache, 30);
+}
+
 void MainWindow::replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab)
 {
     if (!newContent) {
         return;
     }
 
+    if (m_cachedMonitorWidget && m_cachedMonitorWidget != m_monitorTabContent && m_cachedMonitorWidget != newContent) {
+        m_cachedMonitorWidget->deleteLater();
+    }
     m_cachedMonitorWidget = newContent;
 
     if (!m_monitorTabContent) {
@@ -3972,48 +4413,8 @@ QString MainWindow::monitorRowKey(const QString& projectPath, const SessionInfo&
 
 void MainWindow::updateMonitorStatusLabel(QWidget *label, SessionStatus status) const
 {
-    if (!label) {
-        return;
-    }
-
-    QString statusText;
-    QString barStyle;
-    if (status == SessionStatus::Working) {
-        statusText = tr("Working");
-        barStyle =
-            "QProgressBar#monitorStatusBar { border: 1px solid #bfe7c8; border-radius: 6px; background: #edf9f0; padding: 0; }"
-            "QProgressBar#monitorStatusBar::chunk { background: #34c759; border-radius: 5px; }";
-    } else {
-        statusText = tr("Ready");
-        barStyle =
-            "QProgressBar#monitorStatusBar { border: 1px solid #9bc7ff; border-radius: 6px; background: #d9ecff; padding: 0; }"
-            "QProgressBar#monitorStatusBar::chunk { background: #4f9cff; border-radius: 5px; }";
-    }
-
-    if (QProgressBar *statusBar = label->findChild<QProgressBar*>("monitorStatusBar")) {
-        statusBar->setStyleSheet(barStyle);
-        if (status == SessionStatus::Working) {
-            statusBar->setProperty("slowMode", true);
-            statusBar->setRange(0, 0);
-        } else {
-            statusBar->setProperty("slowMode", false);
-            statusBar->setRange(0, 100);
-            statusBar->setValue(0);
-        }
-    }
-
-    if (QLabel *statusTextLabel = label->findChild<QLabel*>("monitorStatusText")) {
-        const qint64 runtimeSeconds = label->property("runtimeSeconds").toLongLong();
-        statusTextLabel->setText(QString("%1 %2").arg(statusText, formatSessionRuntime(runtimeSeconds)));
-        statusTextLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        if (status == SessionStatus::Working) {
-            statusTextLabel->setStyleSheet("QLabel { color: #34c759; font-size: 12px; background: transparent; border: none; padding-left: 8px; font-weight: 600; }");
-        } else {
-            statusTextLabel->setStyleSheet("QLabel { color: #007aff; font-size: 12px; background: transparent; border: none; padding-left: 8px; font-weight: 600; }");
-        }
-    }
-
-    label->setToolTip(statusText);
+    Q_UNUSED(label);
+    Q_UNUSED(status);
 }
 
 bool MainWindow::updateMonitorStatusCells(const QList<ProjectMonitorData>& data)
@@ -4043,7 +4444,7 @@ bool MainWindow::updateMonitorStatusCells(const QList<ProjectMonitorData>& data)
         if (!row) {
             return false;
         }
-        if (row->data(0, Qt::UserRole + 10).toString() != expectedRows[i].first) {
+        if (row->data(0, kMonitorRowKeyRole).toString() != expectedRows[i].first) {
             return false;
         }
     }
@@ -4055,15 +4456,11 @@ bool MainWindow::updateMonitorStatusCells(const QList<ProjectMonitorData>& data)
         }
 
         const SessionStatus status = expectedRows[i].second;
-        row->setData(0, Qt::UserRole + 6, static_cast<int>(status));
-        QWidget *statusLabel = tree->itemWidget(row, 4);
-        if (!statusLabel) {
-            continue;
-        }
-        statusLabel->setProperty("runtimeSeconds", row->data(0, Qt::UserRole + 11));
-        updateMonitorStatusLabel(statusLabel, status);
+        row->setData(0, kMonitorStatusRole, static_cast<int>(status));
+        row->setData(0, Qt::DisplayRole, row->data(0, Qt::DisplayRole));
     }
 
+    tree->viewport()->update();
     return true;
 }
 
@@ -4110,8 +4507,11 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
     tree->setTextElideMode(Qt::ElideMiddle);
     tree->setProperty("isMonitorTree", true);
     tree->installEventFilter(this);
+    tree->viewport()->setProperty("isMonitorTreeViewport", true);
+    tree->viewport()->installEventFilter(this);
     tree->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     tree->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tree->setMouseTracking(true);
     tree->header()->setStretchLastSection(false);
     tree->header()->setMinimumSectionSize(72);
     tree->header()->setSectionsClickable(true);
@@ -4125,12 +4525,13 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
         "QTreeWidget { border: 1px solid #e8e8ed; border-radius: 6px; background: white; }"
         "QTreeWidget::item { padding: 6px 10px; border-bottom: 1px solid #f5f5f7; }"
         "QTreeWidget::item:selected { background: #e8f4fd; color: #1d1d1f; }"
-        "QHeaderView::section { background: #f5f5f7; color: #86868b; font-size: 12px; font-weight: 600; padding: 6px 4px; border: none; border-bottom: 1px solid #e0e0e0; }"
+        "QHeaderView::section { background: #f5f5f7; color: #86868b; font-size: 14px; font-weight: 600; padding: 6px 4px; border: none; border-bottom: 1px solid #e0e0e0; }"
     );
     connect(tree, &QTreeWidget::itemDoubleClicked, this,
             [this](QTreeWidgetItem *item, int) {
                 openMonitorTarget(item);
             });
+    tree->setItemDelegate(new MonitorTreeDelegate(tree));
 
     if (monitorData.isEmpty()) {
         QTreeWidgetItem *emptyItem = new QTreeWidgetItem(tree);
@@ -4182,55 +4583,21 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
                 row->setToolTip(3, QString("Session: %1\nTool: %2\nPath: %3").arg(si.sessionId, si.toolName, si.projectPath));
 
                 // Col 4: Status
-                QWidget *statusContainer = new QWidget();
-                statusContainer->setStyleSheet("QWidget { background: transparent; border: none; }");
-                statusContainer->setMinimumWidth(344);
-                QHBoxLayout *statusLayout = new QHBoxLayout(statusContainer);
-                statusLayout->setContentsMargins(4, 0, 4, 0);
-                statusLayout->setAlignment(Qt::AlignVCenter);
-                statusLayout->setSpacing(8);
-                QProgressBar *statusBar = new QProgressBar(statusContainer);
-                statusBar->setObjectName("monitorStatusBar");
-                statusBar->setTextVisible(false);
-                statusBar->setMinimumWidth(220);
-                statusBar->setMaximumWidth(240);
-                statusBar->setFixedHeight(12);
-                statusBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-                statusLayout->addWidget(statusBar);
-                QLabel *statusTextLabel = new QLabel(statusContainer);
-                statusTextLabel->setObjectName("monitorStatusText");
-                statusTextLabel->setMinimumWidth(104);
-                statusTextLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
-                statusLayout->addWidget(statusTextLabel);
-                statusContainer->setProperty("runtimeSeconds", si.runtimeSeconds);
-                updateMonitorStatusLabel(statusContainer, si.status);
-                tree->setItemWidget(row, 4, statusContainer);
+                row->setText(4, si.status == SessionStatus::Working ? tr("Working") : tr("Ready"));
+                row->setText(5, tr("Goto"));
 
-                // Col 5: Goto button - activate terminal directly
-                QPushButton *gotoBtn = new QPushButton(tr("Goto"));
-                gotoBtn->setMinimumSize(QSize(72, 28));
-                gotoBtn->setCursor(Qt::PointingHandCursor);
-                gotoBtn->setStyleSheet(
-                    "QPushButton { background: #34c759; color: white; font-size: 11px; font-weight: 500; border: none; border-radius: 4px; }"
-                    "QPushButton:hover { background: #2db85e; }");
-                tree->setItemWidget(row, 5, gotoBtn);
-
-                row->setData(0, Qt::UserRole, pmd.projectPath);
-                row->setData(0, Qt::UserRole + 1, si.terminalName);
-                row->setData(0, Qt::UserRole + 2, si.terminalPid);
-                row->setData(0, Qt::UserRole + 3, si.toolName);
-                row->setData(0, Qt::UserRole + 4, si.detailText);
-                row->setData(0, Qt::UserRole + 5, si.sessionPath);
-                row->setData(0, Qt::UserRole + 6, static_cast<int>(si.status));
-                row->setData(0, Qt::UserRole + 7, pmd.projectName);
-                row->setData(0, Qt::UserRole + 8, si.processPid);
-                row->setData(0, Qt::UserRole + 9, si.sessionId);
-                row->setData(0, Qt::UserRole + 10, monitorRowKey(pmd.projectPath, si));
-                row->setData(0, Qt::UserRole + 11, si.runtimeSeconds);
-
-                connect(gotoBtn, &QPushButton::clicked, this, [this, row]() {
-                    openMonitorTarget(row);
-                });
+                row->setData(0, kMonitorProjectPathRole, pmd.projectPath);
+                row->setData(0, kMonitorTerminalNameRole, si.terminalName);
+                row->setData(0, kMonitorTerminalPidRole, si.terminalPid);
+                row->setData(0, kMonitorToolNameRole, si.toolName);
+                row->setData(0, kMonitorDetailRole, si.detailText);
+                row->setData(0, kMonitorSessionPathRole, si.sessionPath);
+                row->setData(0, kMonitorStatusRole, static_cast<int>(si.status));
+                row->setData(0, kMonitorProjectNameRole, pmd.projectName);
+                row->setData(0, kMonitorProcessPidRole, si.processPid);
+                row->setData(0, kMonitorSessionIdRole, si.sessionId);
+                row->setData(0, kMonitorRowKeyRole, monitorRowKey(pmd.projectPath, si));
+                row->setData(0, kMonitorRuntimeRole, si.runtimeSeconds);
             }
         }
     }
@@ -4303,7 +4670,10 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
         updateSpecialMonitorPanelSizing();
     });
     QTimer::singleShot(0, this, [this]() {
-        refreshSpecialMonitorAsync();
+        refreshSpecialMonitorAsync(false);
+        if (m_specialMonitorRefreshTimer) {
+            m_specialMonitorRefreshTimer->start();
+        }
     });
 
     return container;
@@ -4467,12 +4837,12 @@ void MainWindow::showSessionDetailDialog(const SessionInfo& session)
     
     auto addRow = [&](int row, const QString& label, const QString& value) {
         QLabel *lbl = new QLabel(label);
-        lbl->setStyleSheet("QLabel { color: #86868b; font-size: 13px; }");
+        lbl->setStyleSheet("QLabel { color: #86868b; font-size: 14px; }");
         grid->addWidget(lbl, row, 0);
         QLabel *val = new QLabel(value);
         val->setWordWrap(true);
         val->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        val->setStyleSheet("QLabel { color: #1d1d1f; font-size: 13px; }");
+        val->setStyleSheet("QLabel { color: #1d1d1f; font-size: 14px; }");
         grid->addWidget(val, row, 1);
     };
     

@@ -13,7 +13,7 @@ QString StyleManager::modernStyle() const
 /* Global Settings */
 QWidget {
     font-family: "Helvetica Neue", Arial, sans-serif;
-    font-size: 13px;
+    font-size: 14px;
     color: #1d1d1f;
 }
 
@@ -197,7 +197,7 @@ QTextEdit {
     border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 10px;
     padding: 16px;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.5;
     selection-background-color: rgba(0, 122, 255, 0.3);
 }

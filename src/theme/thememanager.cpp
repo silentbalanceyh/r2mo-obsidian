@@ -523,7 +523,7 @@ QPushButton#langBtnLeft {
     border-bottom-left-radius: 3px;
     border-top-right-radius: 0px;
     border-bottom-right-radius: 0px;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     min-width: 32px;
     max-width: 32px;
@@ -548,7 +548,7 @@ QPushButton#langBtnRight {
     border-bottom-left-radius: 0px;
     border-top-right-radius: 3px;
     border-bottom-right-radius: 3px;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     min-width: 32px;
     max-width: 32px;
@@ -1063,7 +1063,7 @@ QPushButton#langBtnLeft {
     border-bottom-left-radius: 3px;
     border-top-right-radius: 0px;
     border-bottom-right-radius: 0px;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     color: #f5f5f7;
     min-width: 32px;
@@ -1089,7 +1089,7 @@ QPushButton#langBtnRight {
     border-bottom-left-radius: 0px;
     border-top-right-radius: 3px;
     border-bottom-right-radius: 3px;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     color: #f5f5f7;
     min-width: 32px;

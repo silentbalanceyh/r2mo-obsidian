@@ -112,6 +112,30 @@ QJsonObject parseLastJsonObject(const QByteArray& tail)
     return QJsonObject();
 }
 
+QDateTime parseArtifactEventTime(const QJsonObject& object)
+{
+    const QStringList keys = {
+        QStringLiteral("timestamp"),
+        QStringLiteral("time"),
+        QStringLiteral("created_at")
+    };
+    for (const QString& key : keys) {
+        const QString raw = object.value(key).toString();
+        if (raw.isEmpty()) {
+            continue;
+        }
+        const QDateTime parsed = QDateTime::fromString(raw, Qt::ISODateWithMs);
+        if (parsed.isValid()) {
+            return parsed.toUTC();
+        }
+        const QDateTime parsedFallback = QDateTime::fromString(raw, Qt::ISODate);
+        if (parsedFallback.isValid()) {
+            return parsedFallback.toUTC();
+        }
+    }
+    return QDateTime();
+}
+
 bool workspaceTerminalMentionsProject(const QString& rawContent, const QString& projectPath)
 {
     const QString normalizedPath = QDir::cleanPath(projectPath);
@@ -390,6 +414,7 @@ QByteArray SessionScanner::readArtifactTail(const QString& sessionPath, qint64 m
 
 SessionStatus SessionScanner::inferCodexArtifactStatus(const QString& sessionPath) const
 {
+    const double codexActiveFreshSeconds = 8.0;
     const QByteArray tail = readArtifactTail(sessionPath);
     if (tail.isEmpty()) {
         return SessionStatus::Unknown;
@@ -401,21 +426,30 @@ SessionStatus SessionScanner::inferCodexArtifactStatus(const QString& sessionPat
     }
 
     const QString type = lastObject.value("type").toString();
+    const QDateTime eventTime = parseArtifactEventTime(lastObject);
+    const bool eventIsFresh = eventTime.isValid() &&
+        eventTime.secsTo(QDateTime::currentDateTimeUtc()) <= codexActiveFreshSeconds;
     if (type == "task_complete") {
         return SessionStatus::Ready;
     }
     if (type == "task_started") {
-        return SessionStatus::Working;
+        return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
     }
 
     if (type == "event_msg") {
         const QJsonObject payload = lastObject.value("payload").toObject();
         const QString payloadType = payload.value("type").toString();
+        if (payloadType == "user_message") {
+            return SessionStatus::Ready;
+        }
         if (payloadType == "exec_command_begin" ||
             payloadType == "function_call_begin" ||
             payloadType == "patch_apply_begin" ||
             payloadType == "agent_reasoning") {
-            return SessionStatus::Working;
+            return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+        }
+        if (payloadType == "exec_command_end" || payloadType == "patch_apply_end") {
+            return SessionStatus::Ready;
         }
     }
 
@@ -425,12 +459,21 @@ SessionStatus SessionScanner::inferCodexArtifactStatus(const QString& sessionPat
         if (payloadType == "function_call" ||
             payloadType == "custom_tool_call" ||
             payloadType == "reasoning") {
-            return SessionStatus::Working;
+            return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+        }
+        if (payloadType == "function_call_output") {
+            return SessionStatus::Ready;
         }
         if (payloadType == "message") {
             const QString phase = payload.value("phase").toString();
+            if (phase.isEmpty()) {
+                return SessionStatus::Ready;
+            }
             if (phase == "final_answer") {
                 return SessionStatus::Ready;
+            }
+            if (phase == "commentary") {
+                return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
             }
         }
     }
