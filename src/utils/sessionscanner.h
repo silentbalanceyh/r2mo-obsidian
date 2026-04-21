@@ -27,6 +27,7 @@ struct SessionInfo {
     qint64 processPid;
     SessionStatus status;
     QDateTime lastActivity;
+    QDateTime processStartedAt;
     qint64 runtimeSeconds;
     QString sessionPath;
     QString detailText;
@@ -63,8 +64,10 @@ private:
         QString sessionPath;
         QString projectPath;
         QDateTime lastModified;
+        QDateTime startedAt;
     };
 
+    QList<SessionInfo> detectAiProcessSessions() const;
     QList<SessionInfo> detectTerminalProcessSessions(const QString& terminalKeyword,
                                                       const QString& terminalLabel);
     QStringList getAllChildPids(qint64 parentPid, int maxDepth = 5) const;
@@ -72,11 +75,12 @@ private:
     bool isShellProcess(const QString& cmd) const;
     QString getProcessCommand(qint64 pid) const;
     QString getProcessWorkingDir(qint64 pid) const;
+    QDateTime getProcessStartedAt(qint64 pid) const;
     bool isProcessRunning(qint64 pid) const;
     quint64 getProcessCpuTicks(qint64 pid) const;
     SessionStatus determineStatus(qint64 pid, quint64 currentTicks, bool isRunning,
                                   const QString& toolName, const QString& sessionId,
-                                  const QString& sessionPath);
+                                  const QString& sessionPath) const;
     QString identifyToolName(const QString& cmd) const;
     QByteArray readArtifactTail(const QString& sessionPath, qint64 maxBytes = 131072) const;
     SessionStatus inferArtifactStatus(const QString& toolName, const QString& sessionId,
