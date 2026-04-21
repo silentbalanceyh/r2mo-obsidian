@@ -54,8 +54,12 @@ src/utils/aitoolscanner.cpp
      src/utils/aitoolscanner.h
      src/utils/sessionscanner.cpp
      src/utils/sessionscanner.h
-     src/utils/gitscanner.cpp
+    src/utils/gitscanner.cpp
     src/utils/gitscanner.h
+    src/utils/remotesessionscanner.cpp
+    src/utils/remotesessionscanner.h
+    src/utils/sshremoteexecutor.cpp
+    src/utils/sshremoteexecutor.h
     src/utils/specialmonitorfetcher.cpp
     src/utils/specialmonitorfetcher.h
 )

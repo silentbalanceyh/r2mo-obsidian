@@ -8,6 +8,8 @@
 #include "utils/aitoolscanner.h"
 #include "utils/sessionscanner.h"
 #include "utils/gitscanner.h"
+#include "utils/remotesessionscanner.h"
+#include "utils/sshremoteexecutor.h"
 #include "i18n/translationmanager.h"
 
 #include <QMenuBar>
@@ -66,6 +68,9 @@
 #include <QStyleOptionProgressBar>
 #include <QStyleOptionButton>
 #include <QToolTip>
+#include <QCheckBox>
+#include <QFutureWatcher>
+#include <QPlainTextEdit>
 #ifdef Q_OS_MAC
 #include <mach/mach.h>
 #endif
@@ -387,6 +392,7 @@ MainWindow::MainWindow(QWidget *parent)
       , m_monitorProgressLabel(nullptr)
       , m_monitorProgressStep(0)
       , m_memoryUsageTimer(nullptr)
+      , m_remoteConnectivityTimer(nullptr)
       , m_specialMonitorPanel(nullptr)
       , m_specialMonitorTable(nullptr)
       , m_specialMonitorScanWatcher(nullptr)
@@ -1217,6 +1223,13 @@ void MainWindow::setupConnections()
     connect(m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsageLabel);
     m_memoryUsageTimer->start();
     updateMemoryUsageLabel();
+
+    m_remoteConnectivityTimer = new QTimer(this);
+    m_remoteConnectivityTimer->setInterval(30 * 1000);
+    connect(m_remoteConnectivityTimer, &QTimer::timeout, this, [this]() {
+        refreshRemoteConnectivityStatuses(false);
+    });
+    m_remoteConnectivityTimer->start();
     
     // Monitor scan watcher for async refresh
     m_monitorScanWatcher = new QFutureWatcher<QList<ProjectMonitorData>>(this);
@@ -1251,6 +1264,8 @@ void MainWindow::setupConnections()
         refreshSpecialMonitorAsync(false);
     });
     m_specialMonitorRefreshTimer->stop();
+
+    refreshRemoteConnectivityStatuses(true);
     
     // Swimlane scan watcher for async refresh
     m_swimlaneScanWatcher = new QFutureWatcher<SwimlaneScanData>(this);
@@ -1294,23 +1309,48 @@ void MainWindow::updateVaultList()
     const QSignalBlocker blocker(m_vaultList);
     m_vaultList->clear();
     
-    QList<Vault> vaults = m_vaultModel->vaults();
+    const QList<Vault> vaults = m_vaultModel->vaults();
     QListWidgetItem *selectedItem = nullptr;
-    for (const Vault& v : vaults) {
-        QListWidgetItem *item = new QListWidgetItem(v.name);
-        item->setData(Qt::UserRole, v.path);
-        item->setToolTip(v.path);
-        item->setFlags(item->flags() | Qt::ItemIsEditable);
-        m_vaultList->addItem(item);
-        if (!preferredPath.isEmpty() && v.path == preferredPath) {
-            selectedItem = item;
+    auto appendVaults = [&](const QList<Vault>& groupedVaults, bool editable) {
+        for (const Vault& v : groupedVaults) {
+            QString itemText = v.name;
+            const QString badgeText = vaultStatusBadgeText(v);
+            if (!badgeText.isEmpty()) {
+                itemText += QStringLiteral(" [%1]").arg(badgeText);
+            }
+
+            QListWidgetItem *item = new QListWidgetItem(itemText);
+            item->setData(Qt::UserRole, v.path);
+            item->setData(Qt::UserRole + 1, v.name);
+            item->setData(Qt::UserRole + 2, static_cast<int>(v.kind));
+            item->setToolTip(v.isRemote()
+                ? QStringLiteral("%1\n%2").arg(v.path, v.remotePath)
+                : v.path);
+            if (editable) {
+                item->setFlags(item->flags() | Qt::ItemIsEditable);
+            } else {
+                item->setFlags(Qt::NoItemFlags);
+                item->setForeground(QColor("#86868b"));
+            }
+            if (v.isRemote()) {
+                item->setForeground(vaultStatusBadgeColor(v));
+            }
+            m_vaultList->addItem(item);
+            if (!preferredPath.isEmpty() && v.path == preferredPath) {
+                selectedItem = item;
+            }
         }
-    }
+    };
+
+    addVaultListGroupHeader(tr("Local Repositories"));
+    appendVaults(localVaults(), true);
+    addVaultListGroupHeader(tr("Remote Repositories"));
+    appendVaults(remoteVaults(), true);
 
     if (!selectedItem && !preferredPath.isEmpty()) {
         for (int i = 0; i < m_vaultList->count(); ++i) {
             QListWidgetItem *item = m_vaultList->item(i);
-            if (item && item->data(Qt::UserRole).toString() == preferredPath) {
+            if (item && (item->flags() & Qt::ItemIsSelectable) && item->data(Qt::UserRole).toString() == preferredPath) {
                 selectedItem = item;
                 break;
             }
@@ -1334,7 +1374,7 @@ void MainWindow::syncVaultOrderFromList()
     orderedPaths.reserve(m_vaultList->count());
     for (int i = 0; i < m_vaultList->count(); ++i) {
         QListWidgetItem *item = m_vaultList->item(i);
-        if (!item) {
+        if (!item || !(item->flags() & Qt::ItemIsSelectable)) {
             continue;
         }
         orderedPaths.append(item->data(Qt::UserRole).toString());
@@ -1369,6 +1409,27 @@ void MainWindow::invalidateMonitorView(bool refreshIfOpen)
 
 void MainWindow::onAddVault()
 {
+    const QStringList addOptions = {
+        tr("Add Local Repository"),
+        tr("Add Remote Repository")
+    };
+    bool optionAccepted = false;
+    const QString addChoice = QInputDialog::getItem(
+        this,
+        tr("Add Repository"),
+        tr("Choose repository type:"),
+        addOptions,
+        0,
+        false,
+        &optionAccepted);
+    if (!optionAccepted) {
+        return;
+    }
+    if (addChoice == tr("Add Remote Repository")) {
+        addRemoteRepository();
+        return;
+    }
+
     // Create selection dialog with tree view
     QDialog dialog(this);
     dialog.setWindowTitle(tr("Add Project Directory"));
@@ -1760,7 +1821,7 @@ void MainWindow::onOpenInObsidian()
 
 void MainWindow::onVaultDoubleClicked(QListWidgetItem *item)
 {
-    if (!item) return;
+    if (!item || !(item->flags() & Qt::ItemIsSelectable)) return;
     
     QString path = item->data(Qt::UserRole).toString();
     if (resolveObsidianOpenPath(path).isEmpty()) {
@@ -1772,7 +1833,7 @@ void MainWindow::onVaultDoubleClicked(QListWidgetItem *item)
 void MainWindow::onVaultContextMenu(const QPoint &pos)
 {
     QListWidgetItem *item = m_vaultList->itemAt(pos);
-    if (!item) return;
+    if (!item || !(item->flags() & Qt::ItemIsSelectable)) return;
 
     // Store path for potential rename
     m_editingVaultPath = item->data(Qt::UserRole).toString();
@@ -1810,7 +1871,7 @@ void MainWindow::onVaultContextMenu(const QPoint &pos)
 
 void MainWindow::onVaultItemChanged(QListWidgetItem *item)
 {
-    if (m_editingVaultPath.isEmpty()) return;
+    if (!item || !(item->flags() & Qt::ItemIsEditable) || m_editingVaultPath.isEmpty()) return;
     
     QString newName = item->text().trimmed();
     if (newName.isEmpty()) {
@@ -1843,8 +1904,321 @@ void MainWindow::onVaultItemChanged(QListWidgetItem *item)
     m_editingVaultPath.clear();
 }
 
+QListWidgetItem* MainWindow::addVaultListGroupHeader(const QString& title)
+{
+    QListWidgetItem *headerItem = new QListWidgetItem(title);
+    headerItem->setFlags(Qt::NoItemFlags);
+    QFont headerFont = headerItem->font();
+    headerFont.setBold(true);
+    headerFont.setPointSize(qMax(14, headerFont.pointSize()));
+    headerItem->setFont(headerFont);
+    headerItem->setForeground(QColor("#86868b"));
+    m_vaultList->addItem(headerItem);
+    return headerItem;
+}
+
+QList<Vault> MainWindow::localVaults() const
+{
+    QList<Vault> result;
+    const QList<Vault> allVaults = m_vaultModel->vaults();
+    for (const Vault& vault : allVaults) {
+        if (!vault.isRemote()) {
+            result.append(vault);
+        }
+    }
+    return result;
+}
+
+QList<Vault> MainWindow::remoteVaults() const
+{
+    QList<Vault> result;
+    const QList<Vault> allVaults = m_vaultModel->vaults();
+    for (const Vault& vault : allVaults) {
+        if (vault.isRemote()) {
+            result.append(vault);
+        }
+    }
+    return result;
+}
+
+Vault MainWindow::vaultByPath(const QString& path) const
+{
+    const int idx = m_vaultModel->indexOf(path);
+    return idx >= 0 ? m_vaultModel->vaultAt(idx) : Vault{};
+}
+
+QString MainWindow::vaultStatusBadgeText(const Vault& vault) const
+{
+    if (!vault.isRemote()) {
+        return QString();
+    }
+
+    switch (vault.connectionStatus) {
+    case VaultConnectionStatus::Connected:
+        return tr("Connected");
+    case VaultConnectionStatus::Disconnected:
+        return tr("Disconnected");
+    case VaultConnectionStatus::Unknown:
+    default:
+        return tr("Checking");
+    }
+}
+
+QColor MainWindow::vaultStatusBadgeColor(const Vault& vault) const
+{
+    if (!vault.isRemote()) {
+        return QColor("#1d1d1f");
+    }
+
+    switch (vault.connectionStatus) {
+    case VaultConnectionStatus::Connected:
+        return QColor("#34c759");
+    case VaultConnectionStatus::Disconnected:
+        return QColor("#ff3b30");
+    case VaultConnectionStatus::Unknown:
+    default:
+        return QColor("#86868b");
+    }
+}
+
+QList<MainWindow::RemoteDirectoryEntry> MainWindow::fetchRemoteDirectories(const Vault& vault, const QString& basePath, QString* errorMessage) const
+{
+    QList<RemoteDirectoryEntry> entries;
+    const QString pathToList = basePath.trimmed().isEmpty() ? vault.remotePath : basePath.trimmed();
+    const SshRemoteCommandResult result = m_sshRemoteExecutor.listDirectories(
+        vault.host,
+        vault.username,
+        vault.password,
+        vault.useKeyAuth,
+        pathToList);
+    if (!result.success) {
+        if (errorMessage) {
+            *errorMessage = result.standardError.isEmpty() ? tr("Failed to list remote directories.") : result.standardError;
+        }
+        return entries;
+    }
+
+    const QStringList lines = result.standardOutput.split('\n', Qt::SkipEmptyParts);
+    for (const QString& line : lines) {
+        QFileInfo info(line.trimmed());
+        if (info.filePath().trimmed().isEmpty()) {
+            continue;
+        }
+        entries.append(RemoteDirectoryEntry{info.filePath(), info.fileName().isEmpty() ? info.filePath() : info.fileName()});
+    }
+    return entries;
+}
+
+void MainWindow::applyRemoteConnectivityResult(const QString& vaultPath, bool connected, const QString& errorText)
+{
+    const int idx = m_vaultModel->indexOf(vaultPath);
+    if (idx < 0) {
+        return;
+    }
+
+    Vault vault = m_vaultModel->vaultAt(idx);
+    if (!vault.isRemote()) {
+        return;
+    }
+
+    vault.connectionStatus = connected ? VaultConnectionStatus::Connected : VaultConnectionStatus::Disconnected;
+    vault.lastConnectionCheck = QDateTime::currentDateTime();
+    vault.lastConnectionError = errorText;
+    m_vaultModel->updateVault(vaultPath, vault);
+    m_vaultModel->save(m_configPath);
+}
+
+void MainWindow::checkRemoteVaultConnectivityAsync(const QString& vaultPath)
+{
+    const Vault vault = vaultByPath(vaultPath);
+    if (!vault.isRemote()) {
+        return;
+    }
+
+    auto *watcher = new QFutureWatcher<QPair<bool, QString>>(this);
+    connect(watcher, &QFutureWatcher<QPair<bool, QString>>::finished, this, [this, watcher, vaultPath]() {
+        const QPair<bool, QString> result = watcher->result();
+        applyRemoteConnectivityResult(vaultPath, result.first, result.second);
+        watcher->deleteLater();
+    });
+
+    watcher->setFuture(QtConcurrent::run([this, vault]() -> QPair<bool, QString> {
+        const QString command = QStringLiteral("test -d %1 && printf connected")
+            .arg(QString("'%1'").arg(QString(vault.remotePath).replace('\'', "'\"'\"'")));
+        const SshRemoteCommandResult result = m_sshRemoteExecutor.runCommand(
+            vault.host,
+            vault.username,
+            vault.password,
+            vault.useKeyAuth,
+            command,
+            12000);
+        if (!result.success) {
+            return qMakePair(false, result.standardError.isEmpty() ? tr("Remote connectivity check failed.") : result.standardError);
+        }
+        return qMakePair(result.standardOutput.contains(QStringLiteral("connected")), QString());
+    }));
+}
+
+void MainWindow::refreshRemoteConnectivityStatuses(bool force)
+{
+    const QList<Vault> remotes = remoteVaults();
+    const QDateTime now = QDateTime::currentDateTime();
+    for (const Vault& vault : remotes) {
+        if (!force && vault.lastConnectionCheck.isValid() && vault.lastConnectionCheck.secsTo(now) < 25) {
+            continue;
+        }
+        checkRemoteVaultConnectivityAsync(vault.path);
+    }
+}
+
+QList<ProjectMonitorData> MainWindow::collectRemoteMonitorData() const
+{
+    QList<ProjectMonitorData> rows;
+    RemoteSessionScanner scanner;
+    const QList<Vault> remotes = remoteVaults();
+    for (const Vault& vault : remotes) {
+        if (vault.connectionStatus != VaultConnectionStatus::Connected) {
+            continue;
+        }
+        rows.append(scanner.scanRemoteVault(vault));
+    }
+    return rows;
+}
+
+void MainWindow::addRemoteRepository()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Add Remote Repository"));
+    dialog.setMinimumWidth(560);
+    dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    QFormLayout *form = new QFormLayout();
+
+    QLineEdit *nameEdit = new QLineEdit(&dialog);
+    QLineEdit *hostEdit = new QLineEdit(&dialog);
+    hostEdit->setPlaceholderText(tr("example.com or 192.168.1.10"));
+    QLineEdit *usernameEdit = new QLineEdit(&dialog);
+    QLineEdit *passwordEdit = new QLineEdit(&dialog);
+    passwordEdit->setEchoMode(QLineEdit::Password);
+    QCheckBox *passwordlessBox = new QCheckBox(tr("Passwordless Login"), &dialog);
+    passwordlessBox->setChecked(true);
+    QCheckBox *showPasswordBox = new QCheckBox(tr("Show Password"), &dialog);
+    QLineEdit *remoteDirEdit = new QLineEdit(&dialog);
+    remoteDirEdit->setPlaceholderText(tr("/path/to/remote/project"));
+    QPushButton *browseRemoteDirBtn = new QPushButton(tr("Browse Remote Directory"), &dialog);
+
+    form->addRow(tr("Repository Name"), nameEdit);
+    form->addRow(tr("Remote Address"), hostEdit);
+    form->addRow(tr("Username"), usernameEdit);
+    form->addRow(tr("Password"), passwordEdit);
+    form->addRow(QString(), passwordlessBox);
+    form->addRow(QString(), showPasswordBox);
+    form->addRow(tr("Remote Directory"), remoteDirEdit);
+    form->addRow(QString(), browseRemoteDirBtn);
+    layout->addLayout(form);
+
+    auto updatePasswordState = [passwordEdit, showPasswordBox, passwordlessBox]() {
+        const bool requiresPassword = !passwordlessBox->isChecked();
+        passwordEdit->setEnabled(requiresPassword);
+        showPasswordBox->setEnabled(requiresPassword);
+        if (!requiresPassword) {
+            passwordEdit->setEchoMode(QLineEdit::Password);
+            showPasswordBox->setChecked(false);
+        }
+    };
+    updatePasswordState();
+    connect(passwordlessBox, &QCheckBox::toggled, &dialog, updatePasswordState);
+    connect(showPasswordBox, &QCheckBox::toggled, &dialog, [passwordEdit](bool checked) {
+        passwordEdit->setEchoMode(checked ? QLineEdit::Normal : QLineEdit::Password);
+    });
+
+    connect(browseRemoteDirBtn, &QPushButton::clicked, &dialog, [this, &dialog, hostEdit, usernameEdit, passwordEdit, passwordlessBox, remoteDirEdit]() {
+        Vault tempVault;
+        tempVault.kind = VaultKind::Remote;
+        tempVault.host = hostEdit->text().trimmed();
+        tempVault.username = usernameEdit->text().trimmed();
+        tempVault.password = passwordEdit->text();
+        tempVault.useKeyAuth = passwordlessBox->isChecked();
+        tempVault.remotePath = remoteDirEdit->text().trimmed().isEmpty() ? QStringLiteral(".") : remoteDirEdit->text().trimmed();
+
+        QString errorMessage;
+        const QList<RemoteDirectoryEntry> directories = fetchRemoteDirectories(tempVault, tempVault.remotePath, &errorMessage);
+        if (directories.isEmpty()) {
+            QMessageBox::warning(&dialog, tr("Remote Directory"), errorMessage.isEmpty() ? tr("No remote directories found.") : errorMessage);
+            return;
+        }
+
+        QStringList options;
+        for (const RemoteDirectoryEntry& entry : directories) {
+            options.append(QStringLiteral("%1 (%2)").arg(entry.displayName, entry.path));
+        }
+
+        bool accepted = false;
+        const QString selected = QInputDialog::getItem(
+            &dialog,
+            tr("Remote Directory"),
+            tr("Select Remote Directory"),
+            options,
+            0,
+            false,
+            &accepted);
+        if (!accepted || selected.isEmpty()) {
+            return;
+        }
+
+        const int optionIndex = options.indexOf(selected);
+        if (optionIndex >= 0 && optionIndex < directories.size()) {
+            remoteDirEdit->setText(directories.at(optionIndex).path);
+        }
+    });
+
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttonBox);
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    dialog.setStyleSheet(ThemeManager::instance()->currentStyle());
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    if (hostEdit->text().trimmed().isEmpty() || usernameEdit->text().trimmed().isEmpty() || remoteDirEdit->text().trimmed().isEmpty()) {
+        QMessageBox::warning(this, tr("Warning"), tr("Remote Address, Username, and Remote Directory are required."));
+        return;
+    }
+
+    Vault vault;
+    vault.kind = VaultKind::Remote;
+    vault.host = hostEdit->text().trimmed();
+    vault.username = usernameEdit->text().trimmed();
+    vault.password = passwordEdit->text();
+    vault.useKeyAuth = passwordlessBox->isChecked();
+    vault.remotePath = remoteDirEdit->text().trimmed();
+    vault.path = Vault::buildRemoteIdentifier(vault.username, vault.host, vault.remotePath);
+    vault.name = nameEdit->text().trimmed().isEmpty()
+        ? QStringLiteral("%1@%2").arg(vault.username, vault.host)
+        : nameEdit->text().trimmed();
+    vault.addedAt = QDateTime::currentDateTime();
+    vault.connectionStatus = VaultConnectionStatus::Unknown;
+
+    if (m_vaultModel->contains(vault.path)) {
+        QMessageBox::information(this, tr("Warning"), tr("This remote repository is already added."));
+        return;
+    }
+
+    m_vaultModel->addVault(vault);
+    m_vaultModel->save(m_configPath);
+    checkRemoteVaultConnectivityAsync(vault.path);
+}
+
 QString MainWindow::resolveObsidianOpenPath(const QString& vaultPath) const
 {
+    const Vault currentVault = vaultByPath(vaultPath);
+    if (currentVault.isRemote()) {
+        return QString();
+    }
+
     // Open priority:
     // 1) If .r2mo/.obsidian exists -> open .r2mo
     // 2) Otherwise, if .obsidian exists in project root -> open project root
@@ -1875,6 +2249,13 @@ QString MainWindow::resolveObsidianOpenPath(const QString& vaultPath) const
 
 void MainWindow::openVaultInObsidian(const QString& vaultPath)
 {
+    const Vault currentVault = vaultByPath(vaultPath);
+    if (currentVault.isRemote()) {
+        QMessageBox::information(this, tr("Unavailable"),
+                                 tr("Remote repositories do not open directly in the local Obsidian application."));
+        return;
+    }
+
     const QString openPath = resolveObsidianOpenPath(vaultPath);
     if (openPath.isEmpty()) {
         QMessageBox::warning(this, tr("Warning"), 
@@ -2468,6 +2849,52 @@ void MainWindow::removeSpecialMonitorSource()
 void MainWindow::updatePreviewPane(const QString& name, const QString& path)
 {
     m_currentPreviewPath = path;
+    const Vault currentVault = vaultByPath(path);
+    if (currentVault.isRemote()) {
+        m_previewTitle->setText(name);
+        m_previewTitle->show();
+        m_previewEditBtn->show();
+        m_previewOpenBtn->setVisible(false);
+        m_previewTitleEdit->hide();
+
+        clearPreviewTabContent();
+        setOverviewEmptyState(false);
+        m_overviewEmptyLabel->setText(tr("Select a vault to view details..."));
+        m_overviewPathLabel->setText(currentVault.path);
+        clearOverviewGrid(m_vaultStatsGrid);
+        clearOverviewGrid(m_r2moStatsGrid);
+
+        addOverviewRow(m_vaultStatsGrid, 0, tr("Repository Type"), tr("Remote (SSH)"));
+        addOverviewRow(m_vaultStatsGrid, 1, tr("Remote Address"), currentVault.host);
+        addOverviewRow(m_vaultStatsGrid, 2, tr("Username"), currentVault.username);
+        addOverviewRow(m_vaultStatsGrid, 3, tr("Remote Directory"), currentVault.remotePath);
+        addOverviewRow(m_vaultStatsGrid, 4, tr("Connection Status"), vaultStatusBadgeText(currentVault), vaultStatusBadgeColor(currentVault).name());
+        addOverviewRow(m_vaultStatsGrid, 5, tr("Authentication"), currentVault.useKeyAuth ? tr("Passwordless Login") : tr("Password Login"));
+
+        const QString checkedText = currentVault.lastConnectionCheck.isValid()
+            ? currentVault.lastConnectionCheck.toString("yyyy-MM-dd HH:mm:ss")
+            : tr("Never");
+        addOverviewRow(m_r2moStatsGrid, 0, tr("Last Checked"), checkedText);
+
+        if (currentVault.connectionStatus == VaultConnectionStatus::Connected) {
+            QString errorMessage;
+            const QList<RemoteDirectoryEntry> childDirectories = fetchRemoteDirectories(currentVault, currentVault.remotePath, &errorMessage);
+            addOverviewRow(m_r2moStatsGrid, 1, tr("Remote Child Directories"), QString::number(childDirectories.size()));
+            if (!errorMessage.isEmpty()) {
+                addOverviewRow(m_r2moStatsGrid, 2, tr("Notice"), errorMessage, "#ff9500");
+            }
+        } else {
+            addOverviewRow(m_r2moStatsGrid, 1, tr("Notice"),
+                           currentVault.lastConnectionError.isEmpty()
+                               ? tr("Remote repository is currently disconnected.")
+                               : currentVault.lastConnectionError,
+                           "#ff3b30");
+        }
+        m_r2moStatsCard->setVisible(true);
+        m_previewProjectCache = PreviewProjectCache{};
+        return;
+    }
+
     const bool hasObsidian = !resolveObsidianOpenPath(path).isEmpty();
     
     // Update title and show buttons
@@ -3065,8 +3492,15 @@ void MainWindow::onPreviewTitleReturnPressed()
 
 void MainWindow::onVaultSelected(QListWidgetItem* item)
 {
+    if (!item || !(item->flags() & Qt::ItemIsSelectable)) {
+        return;
+    }
+
     QString path = item->data(Qt::UserRole).toString();
-    QString name = item->text();
+    QString name = item->data(Qt::UserRole + 1).toString();
+    if (name.isEmpty()) {
+        name = item->text();
+    }
     
     updatePreviewPane(name, path);
     
@@ -4178,7 +4612,9 @@ void MainWindow::openMonitorTab()
     QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
         QList<QPair<QString, QString>> projects = collectAllProjectPaths();
         SessionScanner scanner;
-        return scanner.scanLiveSessions(projects);
+        QList<ProjectMonitorData> data = scanner.scanLiveSessions(projects);
+        data.append(collectRemoteMonitorData());
+        return data;
     });
     m_monitorScanWatcher->setFuture(future);
     
@@ -4196,7 +4632,9 @@ void MainWindow::onMonitorRefresh()
     QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
         QList<QPair<QString, QString>> projects = collectAllProjectPaths();
         SessionScanner scanner;
-        return scanner.scanLiveSessions(projects);
+        QList<ProjectMonitorData> data = scanner.scanLiveSessions(projects);
+        data.append(collectRemoteMonitorData());
+        return data;
     });
     m_monitorScanWatcher->setFuture(future);
 }
@@ -4250,7 +4688,9 @@ void MainWindow::refreshMonitorAsync()
     QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
         QList<QPair<QString, QString>> projects = collectAllProjectPaths();
         SessionScanner scanner;
-        return scanner.scanLiveSessions(projects);
+        QList<ProjectMonitorData> data = scanner.scanLiveSessions(projects);
+        data.append(collectRemoteMonitorData());
+        return data;
     });
     m_monitorScanWatcher->setFuture(future);
 }

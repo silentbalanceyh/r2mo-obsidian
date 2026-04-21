@@ -17,3 +17,5 @@ author:
 - 已断开的远程仓库什么都不做
 - 已连接的远程仓库则支持其他所有的功能，特别是实时监控板中的功能
 - 远程仓库所有登录信息可以保留下来本地存储，下次启动自动重连
+- 2026-04-22: [Team Leader] 完成 task-001：为项目列表追加本地/远程仓库双分组，新增 SSH 远程仓库添加流程（远程地址/账号/免密或密码/远程目录浏览）、远程仓库本地持久化与启动后自动重连检查、30 秒远程连通性状态轮询（Connected/Disconnected/Checking），并将已连接远程仓库接入预览面板与监控板可见行；同时新增 SSH 执行器并通过真实账号 lang@mxt.webos.cn 完成远程连通与目录枚举验证，最后通过 CMake 构建验证。
+- 2026-04-22: [Team Leader] 追加远端实时监控验证与实现修正：新增 RemoteSessionScanner，通过 ssh lang@mxt.webos.cn 在远端按项目目录采集真实 Codex/Claude 进程、cwd、session artifact 与 session id，并接入监控板；实测远端项目 /media/psf/r2mo-apps/app-webos 返回 Codex session 019db027-e341-7b33-8726-dddf1a26996d 与 Claude session 9e7ba0e5-a116-4bdd-a14e-56aa55a7f393，构建再次通过。

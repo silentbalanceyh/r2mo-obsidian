@@ -23,6 +23,7 @@
 #include <QStringList>
 #include "theme/thememanager.h"
 #include "utils/gitscanner.h"
+#include "utils/sshremoteexecutor.h"
 #include "utils/aitoolscanner.h"
 #include "utils/r2moscanner.h"
 #include "utils/sessionscanner.h"
@@ -108,6 +109,11 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
+    struct RemoteDirectoryEntry {
+        QString path;
+        QString displayName;
+    };
+
     struct PreviewProjectCache {
         QString vaultPath;
         QList<R2moSubProject> projects;
@@ -123,6 +129,18 @@ private:
     void updatePreviewPane(const QString& name, const QString& path);
     void openVaultInObsidian(const QString& vaultPath);
     QString resolveObsidianOpenPath(const QString& vaultPath) const;
+    Vault vaultByPath(const QString& path) const;
+    QString vaultStatusBadgeText(const Vault& vault) const;
+    QColor vaultStatusBadgeColor(const Vault& vault) const;
+    QListWidgetItem* addVaultListGroupHeader(const QString& title);
+    QList<Vault> localVaults() const;
+    QList<Vault> remoteVaults() const;
+    void addRemoteRepository();
+    QList<RemoteDirectoryEntry> fetchRemoteDirectories(const Vault& vault, const QString& basePath, QString* errorMessage = nullptr) const;
+    void refreshRemoteConnectivityStatuses(bool force = false);
+    void checkRemoteVaultConnectivityAsync(const QString& vaultPath);
+    void applyRemoteConnectivityResult(const QString& vaultPath, bool connected, const QString& errorText);
+    QList<ProjectMonitorData> collectRemoteMonitorData() const;
     void onPreviewEditClicked();
     void onPreviewOpenClicked();
     void onPreviewTitleEditFinished();
@@ -260,6 +278,7 @@ private:
     QLabel *m_monitorProgressLabel;
     int m_monitorProgressStep;
     QTimer *m_memoryUsageTimer;
+    QTimer *m_remoteConnectivityTimer;
     QWidget *m_specialMonitorPanel;
     QTableWidget *m_specialMonitorTable;
     QFutureWatcher<QList<SpecialMonitorSnapshot>> *m_specialMonitorScanWatcher;
@@ -275,6 +294,7 @@ private:
     VaultModel *m_vaultModel;
     SettingsManager *m_settingsManager;
     VaultValidator *m_vaultValidator;
+    SshRemoteExecutor m_sshRemoteExecutor;
     
     // For tracking rename
     QString m_editingVaultPath;

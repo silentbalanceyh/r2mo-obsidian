@@ -2,23 +2,114 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QSet>
+#include <QDir>
+
+namespace {
+QString vaultKindToString(VaultKind kind)
+{
+    switch (kind) {
+    case VaultKind::Remote:
+        return QStringLiteral("remote");
+    case VaultKind::Local:
+    default:
+        return QStringLiteral("local");
+    }
+}
+
+VaultKind vaultKindFromString(const QString& value)
+{
+    return value.compare(QStringLiteral("remote"), Qt::CaseInsensitive) == 0
+        ? VaultKind::Remote
+        : VaultKind::Local;
+}
+
+QString connectionStatusToString(VaultConnectionStatus status)
+{
+    switch (status) {
+    case VaultConnectionStatus::Connected:
+        return QStringLiteral("connected");
+    case VaultConnectionStatus::Disconnected:
+        return QStringLiteral("disconnected");
+    case VaultConnectionStatus::Unknown:
+    default:
+        return QStringLiteral("unknown");
+    }
+}
+
+VaultConnectionStatus connectionStatusFromString(const QString& value)
+{
+    if (value.compare(QStringLiteral("connected"), Qt::CaseInsensitive) == 0) {
+        return VaultConnectionStatus::Connected;
+    }
+    if (value.compare(QStringLiteral("disconnected"), Qt::CaseInsensitive) == 0) {
+        return VaultConnectionStatus::Disconnected;
+    }
+    return VaultConnectionStatus::Unknown;
+}
+}
 
 QJsonObject Vault::toJson() const
 {
     QJsonObject obj;
+    obj["kind"] = vaultKindToString(kind);
     obj["name"] = name;
     obj["path"] = path;
     obj["addedAt"] = addedAt.toString(Qt::ISODate);
+    obj["host"] = host;
+    obj["username"] = username;
+    obj["password"] = password;
+    obj["useKeyAuth"] = useKeyAuth;
+    obj["remotePath"] = remotePath;
+    obj["connectionStatus"] = connectionStatusToString(connectionStatus);
+    obj["lastConnectionCheck"] = lastConnectionCheck.toString(Qt::ISODate);
+    obj["lastConnectionError"] = lastConnectionError;
     return obj;
 }
 
 Vault Vault::fromJson(const QJsonObject& json)
 {
     Vault v;
+    v.kind = vaultKindFromString(json["kind"].toString());
     v.name = json["name"].toString();
     v.path = json["path"].toString();
     v.addedAt = QDateTime::fromString(json["addedAt"].toString(), Qt::ISODate);
+    v.host = json["host"].toString();
+    v.username = json["username"].toString();
+    v.password = json["password"].toString();
+    v.useKeyAuth = json.contains("useKeyAuth") ? json["useKeyAuth"].toBool(true) : true;
+    v.remotePath = json["remotePath"].toString();
+    v.connectionStatus = connectionStatusFromString(json["connectionStatus"].toString());
+    v.lastConnectionCheck = QDateTime::fromString(json["lastConnectionCheck"].toString(), Qt::ISODate);
+    v.lastConnectionError = json["lastConnectionError"].toString();
+    if (v.kind == VaultKind::Remote && v.path.trimmed().isEmpty()) {
+        v.path = buildRemoteIdentifier(v.username, v.host, v.remotePath);
+    }
     return v;
+}
+
+bool Vault::isRemote() const
+{
+    return kind == VaultKind::Remote;
+}
+
+QString Vault::connectionStatusText() const
+{
+    switch (connectionStatus) {
+    case VaultConnectionStatus::Connected:
+        return QStringLiteral("connected");
+    case VaultConnectionStatus::Disconnected:
+        return QStringLiteral("disconnected");
+    case VaultConnectionStatus::Unknown:
+    default:
+        return QStringLiteral("unknown");
+    }
+}
+
+QString Vault::buildRemoteIdentifier(const QString& username, const QString& host, const QString& remotePath)
+{
+    const QString normalizedRemotePath = QDir::cleanPath(remotePath.trimmed());
+    return QStringLiteral("ssh://%1@%2%3")
+        .arg(username.trimmed(), host.trimmed(), normalizedRemotePath.startsWith('/') ? normalizedRemotePath : QStringLiteral("/") + normalizedRemotePath);
 }
 
 VaultModel::VaultModel(QObject* parent)

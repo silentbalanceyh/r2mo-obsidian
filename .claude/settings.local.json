@@ -2,9 +2,5 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "env": {
-      "ANTHROPIC_BASE_URL": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-      "ANTHROPIC_API_KEY": "sk-sp-45a92bb7ce8e4f579beab4497a523222"
-  },
   "model": "glm-5"
 }
