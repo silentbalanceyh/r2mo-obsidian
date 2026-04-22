@@ -4826,7 +4826,7 @@ void MainWindow::addMonitorCloseButton(int tabIndex)
     m_mainTabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeBtn);
 }
 
-QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths() const
+QList<QPair<QString, QString>> MainWindow::collectMonitorDisplayProjectPaths() const
 {
     QList<QPair<QString, QString>> result;
     QSet<QString> seenPaths;
@@ -4845,6 +4845,60 @@ QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths() const
     }
     
     return result;
+}
+
+QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths() const
+{
+    QList<QPair<QString, QString>> result = collectMonitorDisplayProjectPaths();
+    QSet<QString> seenPaths;
+    for (const auto& project : result) {
+        seenPaths.insert(project.second);
+    }
+
+    QList<Vault> vaults = m_vaultModel->vaults();
+    for (const Vault& vault : vaults) {
+        if (vault.isRemote() || !QDir(vault.path).exists()) {
+            continue;
+        }
+
+        if (!m_vaultValidator->hasR2moConfig(vault.path)) {
+            continue;
+        }
+
+        R2moScanner scanner;
+        QList<R2moSubProject> projects = scanner.scanVault(vault.path);
+        for (const R2moSubProject& proj : projects) {
+            const QString normalizedProjectPath = QDir::cleanPath(proj.path);
+            if (seenPaths.contains(normalizedProjectPath)) {
+                continue;
+            }
+            result.append(qMakePair(proj.name, normalizedProjectPath));
+            seenPaths.insert(normalizedProjectPath);
+        }
+    }
+
+    return result;
+}
+
+QPair<QString, QString> MainWindow::monitorDisplayProjectForPath(const QString& projectPath) const
+{
+    const QString normalizedProjectPath = QDir::cleanPath(projectPath);
+    QPair<QString, QString> bestMatch;
+    int bestLength = -1;
+
+    const QList<QPair<QString, QString>> displayProjects = collectMonitorDisplayProjectPaths();
+    for (const auto& project : displayProjects) {
+        const QString normalizedDisplayPath = QDir::cleanPath(project.second);
+        if (normalizedProjectPath == normalizedDisplayPath ||
+            normalizedProjectPath.startsWith(normalizedDisplayPath + QStringLiteral("/"))) {
+            if (normalizedDisplayPath.length() > bestLength) {
+                bestLength = normalizedDisplayPath.length();
+                bestMatch = project;
+            }
+        }
+    }
+
+    return bestMatch;
 }
 
 void MainWindow::onMonitorBoard()
@@ -4871,11 +4925,12 @@ void MainWindow::startMonitorRefresh(bool initialOpen)
 
     m_monitorRefreshing = true;
     const int generation = ++m_monitorRefreshGeneration;
-    const QList<QPair<QString, QString>> projects = collectAllProjectPaths();
+    const QList<QPair<QString, QString>> displayProjects = collectMonitorDisplayProjectPaths();
+    const QList<QPair<QString, QString>> scanProjects = collectAllProjectPaths();
 
     m_monitorProjectCache.clear();
     m_monitorLoadingProjects.clear();
-    for (const auto& project : projects) {
+    for (const auto& project : displayProjects) {
         ProjectMonitorData placeholder;
         placeholder.projectName = project.first;
         placeholder.projectPath = project.second;
@@ -4893,13 +4948,13 @@ void MainWindow::startMonitorRefresh(bool initialOpen)
     setMonitorRefreshEnabled(false);
     setMonitorRefreshLoading(true);
 
-    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this, generation, projects]() {
+    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this, generation, scanProjects]() {
         QList<ProjectMonitorData> finalData;
-        finalData.reserve(projects.size());
+        finalData.reserve(scanProjects.size());
 
-        QFuture<QList<ProjectMonitorData>> localFuture = QtConcurrent::run([&projects]() {
+        QFuture<QList<ProjectMonitorData>> localFuture = QtConcurrent::run([&scanProjects]() {
             SessionScanner scanner;
-            return scanner.scanLiveSessions(projects);
+            return scanner.scanLiveSessions(scanProjects);
         });
 
         QFuture<QList<ProjectMonitorData>> remoteFuture = QtConcurrent::run([this]() {
@@ -4935,12 +4990,28 @@ void MainWindow::applyMonitorRefreshBatch(int generation, const QList<ProjectMon
     }
 
     for (const ProjectMonitorData& projectData : data) {
-        m_monitorProjectCache.insert(projectData.projectPath, projectData);
-        m_monitorLoadingProjects.remove(projectData.projectPath);
+        const QPair<QString, QString> displayProject = monitorDisplayProjectForPath(projectData.projectPath);
+        if (displayProject.second.isEmpty()) {
+            continue;
+        }
+
+        ProjectMonitorData merged = m_monitorProjectCache.value(displayProject.second);
+        if (merged.projectPath.isEmpty()) {
+            merged.projectName = displayProject.first;
+            merged.projectPath = displayProject.second;
+            merged.totalWorking = 0;
+            merged.totalReady = 0;
+        }
+
+        merged.sessions.append(projectData.sessions);
+        merged.totalWorking += projectData.totalWorking;
+        merged.totalReady += projectData.totalReady;
+        m_monitorProjectCache.insert(displayProject.second, merged);
+        m_monitorLoadingProjects.remove(displayProject.second);
     }
 
     QList<ProjectMonitorData> mergedData;
-    const QList<QPair<QString, QString>> projects = collectAllProjectPaths();
+    const QList<QPair<QString, QString>> projects = collectMonitorDisplayProjectPaths();
     mergedData.reserve(projects.size());
     for (const auto& project : projects) {
         const auto it = m_monitorProjectCache.constFind(project.second);
