@@ -56,8 +56,24 @@ require_pattern 'class[[:space:]]+MonitorTreeDelegate' "$source" \
     "Monitor row status must be rendered through the lightweight delegate."
 require_pattern 'kMonitorLoadingRole' "$source" \
     "Monitor rows must carry an inline refreshing state."
-require_pattern 'QCoreApplication::translate\("MainWindow",[[:space:]]*"Refreshing\.\.\."\)' "$source" \
-    "Monitor status delegate must render row-level refreshing text."
+require_pattern 'kMonitorPlaceholderRole' "$source" \
+    "Placeholder rows must be distinguishable from real session rows."
+require_pattern 'buildMonitorView\(displayPlaceholders\)' "$source" \
+    "Initial monitor opening must render project rows immediately instead of an empty table."
+require_pattern 'createMonitorLoadingIcon' "$source" \
+    "Monitor row refresh feedback should be a compact project-column indicator."
+require_pattern 'row->setIcon\(0,[[:space:]]*projectLoading[[:space:]]*\?[[:space:]]*createMonitorLoadingIcon\(\)[[:space:]]*:[[:space:]]*QIcon\(\)\)' "$source" \
+    "Refreshing state should appear beside the project name, not as blocking row text."
+require_pattern 'row->setIcon\(0,[[:space:]]*rowLoading[[:space:]]*\?[[:space:]]*createMonitorLoadingIcon\(\)[[:space:]]*:[[:space:]]*QIcon\(\)\)' "$source" \
+    "Refresh toggling must update the project-column loading indicator in place."
+require_pattern 'baseIndex\.data\(kMonitorPlaceholderRole\)\.toBool\(\)' "$source" \
+    "Status delegate must bypass progress-bar painting for placeholder rows."
+forbid_pattern 'QCoreApplication::translate\("MainWindow",[[:space:]]*"Refreshing\.\.\."\)' "$source" \
+    "Monitor table loading should no longer be rendered as status-column text."
+forbid_pattern 'row->setText\(1,[[:space:]]*projectLoading[[:space:]]*\\?[[:space:]]*tr\("Refreshing\.\.\."\)' "$source" \
+    "Refreshing state must not overwrite the Terminal column."
+forbid_pattern 'row->setText\(4,[[:space:]]*projectLoading[[:space:]]*\\?[[:space:]]*tr\("Refreshing\.\.\."\)' "$source" \
+    "Refreshing state must not overwrite the Status column."
 require_pattern 'statusWidth[[:space:]]*=.*344.*372' "$source" \
     "Monitor status column width must be expanded to fit the wider bar and visible status text."
 require_pattern 'minStatusWidth[[:space:]]*=[[:space:]]*336' "$source" \

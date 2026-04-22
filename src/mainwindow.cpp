@@ -108,6 +108,25 @@ constexpr int kMonitorSessionIdRole = Qt::UserRole + 9;
 constexpr int kMonitorRowKeyRole = Qt::UserRole + 10;
 constexpr int kMonitorRuntimeRole = Qt::UserRole + 11;
 constexpr int kMonitorLoadingRole = Qt::UserRole + 12;
+constexpr int kMonitorPlaceholderRole = Qt::UserRole + 13;
+
+QIcon createMonitorLoadingIcon()
+{
+    QPixmap pixmap(14, 14);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(QColor("#007aff"), 2));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(QRectF(3, 3, 8, 8));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor("#007aff"));
+    painter.drawEllipse(QRectF(9, 1, 4, 4));
+    painter.end();
+
+    return QIcon(pixmap);
+}
 
 class SwimlaneQueueWidget final : public QWidget
 {
@@ -236,19 +255,26 @@ private:
         painter->setRenderHint(QPainter::Antialiasing, true);
 
         const QModelIndex baseIndex = index.sibling(index.row(), 0);
-        const bool isLoading = baseIndex.data(kMonitorLoadingRole).toBool();
+        const bool isPlaceholder = baseIndex.data(kMonitorPlaceholderRole).toBool();
+        if (isPlaceholder) {
+            const QString statusText = index.data(Qt::DisplayRole).toString();
+            QStyleOptionViewItem textOption(option);
+            initStyleOption(&textOption, index);
+            textOption.text = statusText;
+            textOption.palette.setColor(QPalette::Text, QColor("#86868b"));
+            QStyledItemDelegate::paint(painter, textOption, index);
+            painter->restore();
+            return;
+        }
+
         const SessionStatus status = static_cast<SessionStatus>(baseIndex.data(kMonitorStatusRole).toInt());
         const qint64 runtimeSeconds = baseIndex.data(kMonitorRuntimeRole).toLongLong();
         const QString runtimeText = formatRuntime(runtimeSeconds);
         const bool isWorking = status == SessionStatus::Working;
-        const QString statusLabel = isLoading
-                ? QCoreApplication::translate("MainWindow", "Refreshing...")
-                : (isWorking
+        const QString statusLabel = isWorking
                 ? QCoreApplication::translate("MainWindow", "Working")
-                : QCoreApplication::translate("MainWindow", "Ready"));
-        const QString statusText = isLoading
-            ? statusLabel
-            : statusLabel + QStringLiteral(" ") + runtimeText;
+                : QCoreApplication::translate("MainWindow", "Ready");
+        const QString statusText = statusLabel + QStringLiteral(" ") + runtimeText;
 
         const QRect contentRect = option.rect.adjusted(8, 5, -8, -5);
         const int textWidth = qMax(120, option.fontMetrics.horizontalAdvance(statusText) + 16);
@@ -256,12 +282,9 @@ private:
         const QRect barRect(contentRect.left(), contentRect.top(), qMax(120, textRect.left() - contentRect.left() - 10), 12);
         const QRect centeredBarRect(barRect.left(), contentRect.center().y() - 6, barRect.width(), 12);
 
-        const QColor borderColor = isLoading ? QColor("#d0d0d7")
-            : (isWorking ? QColor("#bfe7c8") : QColor("#9bc7ff"));
-        const QColor backgroundColor = isLoading ? QColor("#f5f5f7")
-            : (isWorking ? QColor("#edf9f0") : QColor("#d9ecff"));
-        const QColor fillColor = isLoading ? QColor("#c7c7cc")
-            : (isWorking ? QColor("#34c759") : QColor("#4f9cff"));
+        const QColor borderColor = isWorking ? QColor("#bfe7c8") : QColor("#9bc7ff");
+        const QColor backgroundColor = isWorking ? QColor("#edf9f0") : QColor("#d9ecff");
+        const QColor fillColor = isWorking ? QColor("#34c759") : QColor("#4f9cff");
 
         QPainterPath barPath;
         barPath.addRoundedRect(centeredBarRect, 6, 6);
@@ -271,14 +294,7 @@ private:
 
         painter->save();
         painter->setClipPath(barPath);
-        if (isLoading) {
-            painter->fillRect(centeredBarRect, fillColor);
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(255, 255, 255, 92));
-            for (int x = centeredBarRect.left() - 20 + m_animationOffset; x < centeredBarRect.right() + 20; x += 20) {
-                painter->drawRect(QRect(x, centeredBarRect.top(), 8, centeredBarRect.height()));
-            }
-        } else if (isWorking) {
+        if (isWorking) {
             painter->fillRect(centeredBarRect, fillColor);
             painter->setPen(Qt::NoPen);
             painter->setBrush(QColor(255, 255, 255, 78));
@@ -300,8 +316,7 @@ private:
         }
         painter->restore();
 
-        painter->setPen(isLoading ? QColor("#86868b")
-            : (isWorking ? QColor("#34c759") : QColor("#007aff")));
+        painter->setPen(isWorking ? QColor("#34c759") : QColor("#007aff"));
         painter->setFont(option.font);
         painter->drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, statusText);
         painter->restore();
@@ -4941,16 +4956,59 @@ void MainWindow::startMonitorRefresh(bool initialOpen)
     }
 
     if (initialOpen || !m_monitorTabContent) {
-        QWidget *newWidget = buildMonitorView({});
+        QList<ProjectMonitorData> displayPlaceholders;
+        displayPlaceholders.reserve(displayProjects.size());
+        for (const auto& project : displayProjects) {
+            displayPlaceholders.append(m_monitorProjectCache.value(project.second));
+        }
+        QWidget *newWidget = buildMonitorView(displayPlaceholders);
         replaceMonitorContent(newWidget, true);
     }
 
     setMonitorRefreshEnabled(false);
     setMonitorRefreshLoading(true);
 
-    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this, generation, scanProjects]() {
+    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this, generation, displayProjects, scanProjects]() {
         QList<ProjectMonitorData> finalData;
-        finalData.reserve(scanProjects.size());
+        finalData.reserve(displayProjects.size());
+
+        auto displayProjectForPath = [&displayProjects](const QString& projectPath) {
+            const QString normalizedProjectPath = QDir::cleanPath(projectPath);
+            QPair<QString, QString> bestMatch;
+            int bestLength = -1;
+            for (const auto& project : displayProjects) {
+                const QString normalizedDisplayPath = QDir::cleanPath(project.second);
+                if (normalizedProjectPath == normalizedDisplayPath ||
+                    normalizedProjectPath.startsWith(normalizedDisplayPath + QStringLiteral("/"))) {
+                    if (normalizedDisplayPath.length() > bestLength) {
+                        bestLength = normalizedDisplayPath.length();
+                        bestMatch = project;
+                    }
+                }
+            }
+            return bestMatch;
+        };
+
+        auto appendToDisplayBatch = [&displayProjectForPath](QMap<QString, ProjectMonitorData>& grouped,
+                                                             const ProjectMonitorData& projectData) {
+            const QPair<QString, QString> displayProject = displayProjectForPath(projectData.projectPath);
+            if (displayProject.second.isEmpty()) {
+                return;
+            }
+
+            ProjectMonitorData merged = grouped.value(displayProject.second);
+            if (merged.projectPath.isEmpty()) {
+                merged.projectName = displayProject.first;
+                merged.projectPath = displayProject.second;
+                merged.totalWorking = 0;
+                merged.totalReady = 0;
+            }
+
+            merged.sessions.append(projectData.sessions);
+            merged.totalWorking += projectData.totalWorking;
+            merged.totalReady += projectData.totalReady;
+            grouped.insert(displayProject.second, merged);
+        };
 
         QFuture<QList<ProjectMonitorData>> localFuture = QtConcurrent::run([&scanProjects]() {
             SessionScanner scanner;
@@ -4962,7 +5020,11 @@ void MainWindow::startMonitorRefresh(bool initialOpen)
         });
 
         const QList<ProjectMonitorData> localData = localFuture.result();
+        QMap<QString, ProjectMonitorData> localDisplayData;
         for (const ProjectMonitorData& projectData : localData) {
+            appendToDisplayBatch(localDisplayData, projectData);
+        }
+        for (const ProjectMonitorData& projectData : localDisplayData) {
             finalData.append(projectData);
             QMetaObject::invokeMethod(this, [this, generation, projectData]() {
                 applyMonitorRefreshBatch(generation, {projectData});
@@ -4970,7 +5032,11 @@ void MainWindow::startMonitorRefresh(bool initialOpen)
         }
 
         const QList<ProjectMonitorData> remoteData = remoteFuture.result();
+        QMap<QString, ProjectMonitorData> remoteDisplayData;
         for (const ProjectMonitorData& projectData : remoteData) {
+            appendToDisplayBatch(remoteDisplayData, projectData);
+        }
+        for (const ProjectMonitorData& projectData : remoteDisplayData) {
             finalData.append(projectData);
             QMetaObject::invokeMethod(this, [this, generation, projectData]() {
                 applyMonitorRefreshBatch(generation, {projectData});
@@ -5137,7 +5203,11 @@ void MainWindow::setMonitorRefreshLoading(bool loading)
     for (int rowIndex = 0; rowIndex < tree->topLevelItemCount(); ++rowIndex) {
         if (QTreeWidgetItem *row = tree->topLevelItem(rowIndex)) {
             const QString projectPath = row->data(0, kMonitorProjectPathRole).toString();
-            row->setData(0, kMonitorLoadingRole, loading && m_monitorLoadingProjects.contains(projectPath));
+            const bool rowLoading = loading && m_monitorLoadingProjects.contains(projectPath);
+            row->setData(0, kMonitorLoadingRole, rowLoading);
+            if (!row->text(0).isEmpty()) {
+                row->setIcon(0, rowLoading ? createMonitorLoadingIcon() : QIcon());
+            }
         }
     }
     tree->viewport()->update();
@@ -5405,13 +5475,14 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
                 row->setText(0, QString());
             } else {
                 row->setText(0, pmd.projectName);
+                row->setIcon(0, projectLoading ? createMonitorLoadingIcon() : QIcon());
                 lastProjectName = pmd.projectName;
             }
             row->setToolTip(0, pmd.projectPath);
-            row->setText(1, projectLoading ? tr("Refreshing...") : QString());
+            row->setText(1, QString());
             row->setText(2, QString());
             row->setText(3, QString());
-            row->setText(4, projectLoading ? tr("Refreshing...") : tr("No active AI sessions detected."));
+            row->setText(4, tr("No active AI sessions detected."));
             row->setForeground(4, QColor("#86868b"));
             row->setData(0, kMonitorProjectPathRole, pmd.projectPath);
             row->setData(0, kMonitorStatusRole, static_cast<int>(SessionStatus::Unknown));
@@ -5421,6 +5492,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
             row->setData(0, kMonitorRowKeyRole, QString("%1|placeholder").arg(pmd.projectPath));
             row->setData(0, kMonitorRuntimeRole, 0);
             row->setData(0, kMonitorLoadingRole, projectLoading);
+            row->setData(0, kMonitorPlaceholderRole, true);
             continue;
         }
 
@@ -5431,6 +5503,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
                 row->setText(0, QString());
             } else {
                 row->setText(0, pmd.projectName);
+                row->setIcon(0, projectLoading ? createMonitorLoadingIcon() : QIcon());
                 lastProjectName = pmd.projectName;
             }
             row->setToolTip(0, pmd.projectPath);
@@ -5475,6 +5548,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
             row->setData(0, kMonitorRowKeyRole, monitorRowKey(pmd.projectPath, si));
             row->setData(0, kMonitorRuntimeRole, si.runtimeSeconds);
             row->setData(0, kMonitorLoadingRole, projectLoading);
+            row->setData(0, kMonitorPlaceholderRole, false);
         }
     }
 

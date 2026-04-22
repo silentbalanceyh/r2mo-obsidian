@@ -34,9 +34,9 @@ require_pattern 'SpecialMonitorSnapshot[[:space:]]+fetchSnapshot[[:space:]]*\([[
     "Special billing fetcher should expose a per-source fetch unit for parallel execution."
 require_pattern 'kMonitorLoadingRole' "$window_source" \
     "Monitor table rows should carry an inline loading state."
-require_pattern 'QCoreApplication::translate\("MainWindow",[[:space:]]*"Refreshing\.\.\."\)' "$window_source" \
-    "Monitor status delegate should render inline refreshing text."
-require_pattern 'kMonitorLoadingRole,[[:space:]]*loading[[:space:]]*&&[[:space:]]*m_monitorLoadingProjects\.contains\(projectPath\)' "$window_source" \
+require_pattern 'createMonitorLoadingIcon' "$window_source" \
+    "Monitor table should use a compact leading loading icon instead of status text."
+require_pattern 'const[[:space:]]+bool[[:space:]]+rowLoading[[:space:]]*=[[:space:]]*loading[[:space:]]*&&[[:space:]]*m_monitorLoadingProjects\.contains\(projectPath\)' "$window_source" \
     "Monitor refresh loading should mark only still-refreshing project rows instead of showing a full-table overlay."
 require_pattern 'overlay->hide\(\)' "$window_source" \
     "Refresh overlays should be kept hidden when inline loading is active."

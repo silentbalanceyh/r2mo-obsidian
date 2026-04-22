@@ -73,6 +73,12 @@ require_pattern 'const[[:space:]]+QList<QPair<QString,[[:space:]]*QString>>[[:sp
     "Monitor refresh should scan with the full project context."
 require_pattern 'scanner\.scanLiveSessions\(scanProjects\)' "$refresh_body" \
     "Local session scanning must use the full scan context, not only visible rows."
+require_pattern 'QMap<QString,[[:space:]]*ProjectMonitorData>[[:space:]]+localDisplayData;' "$refresh_body" \
+    "Local scan results should be grouped by visible project before clearing row loading."
+require_pattern 'appendToDisplayBatch\(localDisplayData,[[:space:]]*projectData\)' "$refresh_body" \
+    "Local child-project rows must be folded into their visible parent batch."
+require_pattern 'QMap<QString,[[:space:]]*ProjectMonitorData>[[:space:]]+remoteDisplayData;' "$refresh_body" \
+    "Remote scan results should be grouped by visible project before clearing row loading."
 require_pattern 'collectMonitorDisplayProjectPaths\(\)' "$batch_body" \
     "Partial monitor batches must be folded back into visible project rows."
 require_pattern 'monitorDisplayProjectForPath' "$batch_body" \
