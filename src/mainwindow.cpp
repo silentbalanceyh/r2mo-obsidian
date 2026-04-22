@@ -2015,27 +2015,70 @@ QString MainWindow::selectRemoteDirectory(const Vault& vault, const QString& sta
 
     QTreeWidget *treeWidget = new QTreeWidget(&dialog);
     treeWidget->setHeaderLabels(QStringList() << tr("Name") << tr("Path"));
-    treeWidget->setRootIsDecorated(true);
+    treeWidget->setRootIsDecorated(false);
     treeWidget->setAlternatingRowColors(true);
     treeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
     treeWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
     treeWidget->setExpandsOnDoubleClick(false);
+    treeWidget->setIconSize(QSize(14, 14));
     treeWidget->setIndentation(18);
+    treeWidget->viewport()->setProperty("isProjectSelectionTreeViewport", true);
+    treeWidget->viewport()->installEventFilter(const_cast<MainWindow*>(this));
     treeWidget->header()->setStretchLastSection(true);
     treeWidget->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     treeWidget->header()->setSectionResizeMode(1, QHeaderView::Stretch);
 
     const int pathRole = Qt::UserRole;
-    const int expandableRole = Qt::UserRole + 1;
+    const int expandableRole = Qt::UserRole + 4;
     const int loadedRole = Qt::UserRole + 2;
+    const int itemKindRole = Qt::UserRole + 3;
+
+    const QColor disclosureColor = ThemeManager::instance()->currentTheme() == ThemeManager::Light
+        ? QColor("#3a3a3c")
+        : QColor("#d0d0d4");
+    const QColor selectedDisclosureColor = QColor("#ffffff");
+
+    auto createDisclosureIcon = [](const QColor& color, bool expanded) {
+        QPixmap pixmap(14, 14);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        QPen pen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        painter.setPen(pen);
+
+        QPainterPath path;
+        if (expanded) {
+            path.moveTo(3.5, 5.0);
+            path.lineTo(7.0, 9.0);
+            path.lineTo(10.5, 5.0);
+        } else {
+            path.moveTo(5.0, 3.5);
+            path.lineTo(9.0, 7.0);
+            path.lineTo(5.0, 10.5);
+        }
+        painter.drawPath(path);
+        painter.end();
+
+        return QIcon(pixmap);
+    };
+
+    std::function<void(QTreeWidgetItem*)> updateRemoteTreeIcons;
+    auto refreshRemoteTreeIcons = [&]() {
+        for (int i = 0; i < treeWidget->topLevelItemCount(); ++i) {
+            updateRemoteTreeIcons(treeWidget->topLevelItem(i));
+        }
+    };
 
     auto createDirectoryNode = [&](QTreeWidgetItem *parent, const RemoteDirectoryEntry& entry) {
         QTreeWidgetItem *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(treeWidget);
-        item->setText(0, QStringLiteral("📂 %1").arg(entry.displayName));
+        item->setText(0, entry.displayName);
         item->setText(1, entry.path);
         item->setData(0, pathRole, entry.path);
         item->setData(0, expandableRole, true);
         item->setData(0, loadedRole, false);
+        item->setData(0, itemKindRole, QStringLiteral("remote_directory"));
         item->setToolTip(0, entry.path);
         item->setToolTip(1, entry.path);
 
@@ -2043,7 +2086,27 @@ QString MainWindow::selectRemoteDirectory(const Vault& vault, const QString& sta
         placeholder->setText(0, tr("Loading..."));
         placeholder->setData(0, expandableRole, false);
         placeholder->setData(0, loadedRole, true);
+        placeholder->setData(0, itemKindRole, QStringLiteral("placeholder"));
         return item;
+    };
+
+    updateRemoteTreeIcons = [&](QTreeWidgetItem *item) {
+        if (!item) {
+            return;
+        }
+
+        const bool expandable = item->data(0, expandableRole).toBool();
+        if (expandable) {
+            const bool selected = treeWidget->currentItem() == item;
+            item->setIcon(0, createDisclosureIcon(selected ? selectedDisclosureColor : disclosureColor,
+                                                  item->isExpanded()));
+        } else {
+            item->setIcon(0, QIcon());
+        }
+
+        for (int i = 0; i < item->childCount(); ++i) {
+            updateRemoteTreeIcons(item->child(i));
+        }
     };
 
     auto loadChildren = [&](QTreeWidgetItem *item) {
@@ -2060,35 +2123,61 @@ QString MainWindow::selectRemoteDirectory(const Vault& vault, const QString& sta
             createDirectoryNode(item, entry);
         }
         item->setData(0, loadedRole, true);
+        item->setData(0, expandableRole, !directories.isEmpty());
         if (directories.isEmpty() && !errorMessage.isEmpty()) {
             QTreeWidgetItem *placeholder = new QTreeWidgetItem(item);
             placeholder->setText(0, errorMessage);
             placeholder->setForeground(0, QColor("#ff9500"));
+            placeholder->setData(0, expandableRole, false);
+            placeholder->setData(0, loadedRole, true);
+            placeholder->setData(0, itemKindRole, QStringLiteral("error"));
         }
+        refreshRemoteTreeIcons();
     };
 
-    QString initialError;
-    const QString rootPath = startPath.trimmed().isEmpty() ? vault.remotePath : startPath.trimmed();
-    const QList<RemoteDirectoryEntry> rootDirectories = fetchRemoteDirectories(vault, rootPath, &initialError);
-    if (rootDirectories.isEmpty()) {
-        QMessageBox::warning(const_cast<MainWindow*>(this),
-                             tr("Remote Directory"),
-                             initialError.isEmpty() ? tr("No remote directories found.") : initialError);
-        return QString();
+    QString homeError;
+    const QList<RemoteDirectoryEntry> homeDirectories = fetchRemoteDirectories(vault, QStringLiteral("."), &homeError);
+    const bool homeLoadFailed = homeDirectories.isEmpty() && !homeError.isEmpty();
+
+    QTreeWidgetItem *homeItem = new QTreeWidgetItem(treeWidget);
+    homeItem->setText(0, QStringLiteral("🏠 ~"));
+    homeItem->setText(1, homeLoadFailed ? tr("Permission denied") : QStringLiteral("~"));
+    homeItem->setData(0, pathRole, QStringLiteral("."));
+    homeItem->setData(0, expandableRole, !homeLoadFailed);
+    homeItem->setData(0, loadedRole, false);
+    homeItem->setData(0, itemKindRole, QStringLiteral("remote_root"));
+    homeItem->setToolTip(0, homeError.isEmpty() ? QStringLiteral("~") : homeError);
+    homeItem->setToolTip(1, homeError.isEmpty() ? QStringLiteral("~") : homeError);
+    if (homeLoadFailed) {
+        homeItem->setForeground(1, QColor("#ff9500"));
+        homeItem->setData(0, loadedRole, true);
     }
 
-    QTreeWidgetItem *rootItem = new QTreeWidgetItem(treeWidget);
-    rootItem->setText(0, QStringLiteral("🖥 %1").arg(rootPath));
-    rootItem->setText(1, rootPath);
-    rootItem->setData(0, pathRole, rootPath);
-    rootItem->setData(0, expandableRole, true);
-    rootItem->setData(0, loadedRole, true);
-    rootItem->setToolTip(0, rootPath);
-    rootItem->setToolTip(1, rootPath);
-    for (const RemoteDirectoryEntry& entry : rootDirectories) {
-        createDirectoryNode(rootItem, entry);
+    QTreeWidgetItem *mediaItem = new QTreeWidgetItem(treeWidget);
+    mediaItem->setText(0, QStringLiteral("💽 /media"));
+    QString mediaError;
+    const SshRemoteCommandResult mediaProbe = m_sshRemoteExecutor.runCommand(
+        vault.host,
+        vault.username,
+        vault.password,
+        vault.useKeyAuth,
+        QStringLiteral("test -r /media"),
+        8000);
+    const bool mediaLoadFailed = !mediaProbe.success;
+    mediaItem->setText(1, mediaLoadFailed ? tr("Permission denied") : QStringLiteral("/media"));
+    mediaItem->setData(0, pathRole, QStringLiteral("/media"));
+    mediaItem->setData(0, expandableRole, !mediaLoadFailed);
+    mediaItem->setData(0, loadedRole, false);
+    mediaItem->setData(0, itemKindRole, QStringLiteral("remote_root"));
+    mediaError = mediaProbe.standardError.trimmed();
+    mediaItem->setToolTip(0, mediaError.isEmpty() ? QStringLiteral("/media") : mediaError);
+    mediaItem->setToolTip(1, mediaError.isEmpty() ? QStringLiteral("/media") : mediaError);
+    if (mediaLoadFailed) {
+        mediaItem->setForeground(1, QColor("#ff9500"));
+        mediaItem->setData(0, loadedRole, true);
     }
-    treeWidget->expandItem(rootItem);
+
+    refreshRemoteTreeIcons();
     layout->addWidget(treeWidget);
 
     QLabel *infoLabel = new QLabel(tr("📂 = Remote directory (double-click to select or expand for children)"), &dialog);
@@ -2105,9 +2194,13 @@ QString MainWindow::selectRemoteDirectory(const Vault& vault, const QString& sta
     layout->addLayout(buttonLayout);
 
     connect(treeWidget, &QTreeWidget::itemExpanded, &dialog, loadChildren);
+    connect(treeWidget, &QTreeWidget::itemCollapsed, &dialog, [&]() {
+        refreshRemoteTreeIcons();
+    });
     connect(treeWidget, &QTreeWidget::itemSelectionChanged, &dialog, [&]() {
         QTreeWidgetItem *current = treeWidget->currentItem();
         selectBtn->setEnabled(current && !current->text(1).isEmpty());
+        refreshRemoteTreeIcons();
     });
     connect(cancelBtn, &QPushButton::clicked, &dialog, &QDialog::reject);
     connect(selectBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
@@ -2317,8 +2410,12 @@ void MainWindow::addRemoteRepository()
     vault.useKeyAuth = passwordlessBox->isChecked();
     vault.remotePath = remoteDirEdit->text().trimmed();
     vault.path = Vault::buildRemoteIdentifier(vault.username, vault.host, vault.remotePath);
+    QString derivedRemoteName = m_vaultValidator->getVaultName(vault.remotePath);
+    if (derivedRemoteName.isEmpty()) {
+        derivedRemoteName = QFileInfo(vault.remotePath).fileName();
+    }
     vault.name = nameEdit->text().trimmed().isEmpty()
-        ? QStringLiteral("%1@%2").arg(vault.username, vault.host)
+        ? derivedRemoteName
         : nameEdit->text().trimmed();
     vault.addedAt = QDateTime::currentDateTime();
     vault.connectionStatus = VaultConnectionStatus::Unknown;
@@ -5165,7 +5262,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
                 if (!si.terminalIconPath.isEmpty()) {
                     QPixmap terminalPix(si.terminalIconPath);
                     if (!terminalPix.isNull()) {
-                        row->setIcon(1, QIcon(terminalPix));
+                        row->setIcon(1, QIcon(terminalPix.scaled(14, 14, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
                     }
                 }
 

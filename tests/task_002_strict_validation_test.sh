@@ -38,6 +38,12 @@ run_case "Task-002 monitor status guards" \
 run_case "Task-002 OpenCode guards" \
     bash "$repo_root/tests/task_002_opencode_session_guard_test.sh"
 
+run_case "Task-002 remote repository selector guards" \
+    bash "$repo_root/tests/task_002_remote_repository_selector_guard_test.sh"
+
+run_case "Task-002 terminal icon guards" \
+    bash "$repo_root/tests/task_002_terminal_icon_guard_test.sh"
+
 run_case "Remote monitor scanner guards" \
     bash "$repo_root/tests/task_001_remote_monitor_session_test.sh"
 

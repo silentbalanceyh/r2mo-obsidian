@@ -443,10 +443,34 @@ QString SessionScanner::toolIconPath(const QString& toolName)
 QString SessionScanner::terminalIconPath(const QString& terminalName)
 {
     QString lower = terminalName.toLower();
-    if (lower.contains("wezterm")) return ":/icons/ui/terminal-wezterm.svg";
-    if (lower.contains("iterm")) return ":/icons/ui/terminal-iterm.svg";
-    if (lower.contains("ghostty")) return ":/icons/ui/terminal-macos.svg";
-    if (lower.contains("terminal")) return ":/icons/ui/terminal-macos.svg";
+    if (lower.contains("ssh")) return ":/icons/ui/terminal-ubuntu.svg";
+    if (lower.contains("wezterm")) {
+        if (QFile::exists(QStringLiteral("/Applications/WezTerm.app"))) {
+            return ":/icons/ui/terminal-wezterm.png";
+        }
+        return ":/icons/ui/terminal-wezterm.svg";
+    }
+    if (lower.contains("iterm")) {
+        if (QFile::exists(QStringLiteral("/Applications/iTerm.app"))) {
+            return ":/icons/ui/terminal-iterm.png";
+        }
+        return ":/icons/ui/terminal-iterm.svg";
+    }
+    if (lower.contains("ghostty")) {
+        if (QFile::exists(QStringLiteral("/Applications/Ghostty.app"))) {
+            return ":/icons/ui/terminal-ghostty.png";
+        }
+        return ":/icons/ui/terminal-macos.svg";
+    }
+    if (lower.contains("terminal")) {
+        if (QFile::exists(QStringLiteral("/Applications/Utilities/Terminal.app"))) {
+            return ":/icons/ui/terminal-terminalapp.png";
+        }
+        if (QFile::exists(QStringLiteral("/System/Applications/Utilities/Terminal.app"))) {
+            return ":/icons/ui/terminal-terminalapp.png";
+        }
+        return ":/icons/ui/terminal-macos.svg";
+    }
     return QString();
 }
 

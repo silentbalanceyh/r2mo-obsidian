@@ -7,5 +7,10 @@
         <file>ui/terminal-wezterm.svg</file>
         <file>ui/terminal-iterm.svg</file>
         <file>ui/terminal-macos.svg</file>
+        <file>ui/terminal-ubuntu.svg</file>
+        <file>ui/terminal-wezterm.png</file>
+        <file>ui/terminal-iterm.png</file>
+        <file>ui/terminal-ghostty.png</file>
+        <file>ui/terminal-terminalapp.png</file>
     </qresource>
 </RCC>
