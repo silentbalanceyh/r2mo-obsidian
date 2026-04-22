@@ -240,13 +240,12 @@ private:
         const SessionStatus status = static_cast<SessionStatus>(baseIndex.data(kMonitorStatusRole).toInt());
         const qint64 runtimeSeconds = baseIndex.data(kMonitorRuntimeRole).toLongLong();
         const QString runtimeText = formatRuntime(runtimeSeconds);
+        const bool isWorking = status == SessionStatus::Working;
         const QString statusLabel = isLoading
                 ? QCoreApplication::translate("MainWindow", "Refreshing...")
-                : (status == SessionStatus::Working
+                : (isWorking
                 ? QCoreApplication::translate("MainWindow", "Working")
-                : (status == SessionStatus::Ready
-                    ? QCoreApplication::translate("MainWindow", "Ready")
-                    : QCoreApplication::translate("MainWindow", "Unknown")));
+                : QCoreApplication::translate("MainWindow", "Ready"));
         const QString statusText = isLoading
             ? statusLabel
             : statusLabel + QStringLiteral(" ") + runtimeText;
@@ -258,14 +257,11 @@ private:
         const QRect centeredBarRect(barRect.left(), contentRect.center().y() - 6, barRect.width(), 12);
 
         const QColor borderColor = isLoading ? QColor("#d0d0d7")
-            : (status == SessionStatus::Working ? QColor("#bfe7c8")
-                : (status == SessionStatus::Ready ? QColor("#9bc7ff") : QColor("#d1d1d6")));
+            : (isWorking ? QColor("#bfe7c8") : QColor("#9bc7ff"));
         const QColor backgroundColor = isLoading ? QColor("#f5f5f7")
-            : (status == SessionStatus::Working ? QColor("#edf9f0")
-                : (status == SessionStatus::Ready ? QColor("#d9ecff") : QColor("#f2f2f7")));
+            : (isWorking ? QColor("#edf9f0") : QColor("#d9ecff"));
         const QColor fillColor = isLoading ? QColor("#c7c7cc")
-            : (status == SessionStatus::Working ? QColor("#34c759")
-                : (status == SessionStatus::Ready ? QColor("#4f9cff") : QColor("#c7c7cc")));
+            : (isWorking ? QColor("#34c759") : QColor("#4f9cff"));
 
         QPainterPath barPath;
         barPath.addRoundedRect(centeredBarRect, 6, 6);
@@ -282,7 +278,7 @@ private:
             for (int x = centeredBarRect.left() - 20 + m_animationOffset; x < centeredBarRect.right() + 20; x += 20) {
                 painter->drawRect(QRect(x, centeredBarRect.top(), 8, centeredBarRect.height()));
             }
-        } else if (status == SessionStatus::Working) {
+        } else if (isWorking) {
             painter->fillRect(centeredBarRect, fillColor);
             painter->setPen(Qt::NoPen);
             painter->setBrush(QColor(255, 255, 255, 78));
@@ -294,21 +290,18 @@ private:
                        << QPoint(x + 10, centeredBarRect.bottom());
                 painter->drawPolygon(stripe);
             }
-        } else if (status == SessionStatus::Ready) {
+        } else {
             painter->fillRect(centeredBarRect, fillColor);
             painter->setPen(Qt::NoPen);
             painter->setBrush(QColor(255, 255, 255, 92));
             for (int x = centeredBarRect.left() + 6; x < centeredBarRect.right(); x += 18) {
                 painter->drawRect(QRect(x, centeredBarRect.top(), 6, centeredBarRect.height()));
             }
-        } else {
-            painter->fillRect(centeredBarRect, fillColor);
         }
         painter->restore();
 
         painter->setPen(isLoading ? QColor("#86868b")
-            : (status == SessionStatus::Working ? QColor("#34c759")
-                : (status == SessionStatus::Ready ? QColor("#007aff") : QColor("#8e8e93"))));
+            : (isWorking ? QColor("#34c759") : QColor("#007aff")));
         painter->setFont(option.font);
         painter->drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, statusText);
         painter->restore();
@@ -5411,7 +5404,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
 
             row->setText(4, si.status == SessionStatus::Working
                 ? tr("Working")
-                : (si.status == SessionStatus::Ready ? tr("Ready") : tr("Unknown")));
+                : tr("Ready"));
             row->setText(5, tr("Goto"));
 
             row->setData(0, kMonitorProjectPathRole, pmd.projectPath);
@@ -5681,10 +5674,8 @@ void MainWindow::showSessionDetailDialog(const SessionInfo& session)
     QString statusText;
     if (session.status == SessionStatus::Working) {
         statusText = tr("Working");
-    } else if (session.status == SessionStatus::Ready) {
-        statusText = tr("Ready");
     } else {
-        statusText = tr("Unknown");
+        statusText = tr("Ready");
     }
     addRow(3, tr("Status"), statusText);
     addRow(4, tr("Terminal"), session.terminalName);
