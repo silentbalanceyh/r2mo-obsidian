@@ -583,7 +583,7 @@ void MainWindow::setupToolBar()
     m_memoryUsageLabel->setObjectName("memoryUsageLabel");
     m_memoryUsageLabel->setMinimumWidth(96);
     m_memoryUsageLabel->setAlignment(Qt::AlignCenter);
-    m_memoryUsageLabel->setStyleSheet("QLabel#memoryUsageLabel { color: #86868b; font-size: 13px; padding: 0 8px; min-height: 28px; background: #f5f5f7; border: 1px solid #d7d7dc; border-radius: 6px; }");
+    m_memoryUsageLabel->setStyleSheet("QLabel#memoryUsageLabel { color: #86868b; font-size: 14px; padding: 0 8px; min-height: 28px; background: #f5f5f7; border: 1px solid #d7d7dc; border-radius: 6px; }");
     rightLayout->addWidget(m_memoryUsageLabel);
     
     // Language button group container (中|En as segmented control)

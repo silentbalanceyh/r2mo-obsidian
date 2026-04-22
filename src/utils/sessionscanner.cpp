@@ -1731,8 +1731,7 @@ void SessionScanner::assignOpenCodeSessionMetadata(QList<SessionInfo>& sessions)
         }
 
         const QStringList candidateIds = collectOpenCodeSessionIdsForProject(projectPath);
-        const QList<int> indexes = it.value();
-        if (indexes.size() != 1 || candidateIds.size() != 1) {
+        if (candidateIds.isEmpty()) {
             continue;
         }
 
@@ -1740,16 +1739,30 @@ void SessionScanner::assignOpenCodeSessionMetadata(QList<SessionInfo>& sessions)
         QString ignoredSessionId;
         findLatestOpenCodeSessionArtifact(projectPath, ignoredSessionId, inferredSessionPath);
 
-        SessionInfo& session = sessions[indexes.first()];
-        session.sessionId = candidateIds.first();
-        if (session.sessionPath.isEmpty() && !inferredSessionPath.isEmpty()) {
-            session.sessionPath = inferredSessionPath;
-        }
-        const SessionStatus artifactStatus = inferArtifactStatus(session.toolName,
-                                                                 session.sessionId,
-                                                                 session.sessionPath);
-        if (artifactStatus != SessionStatus::Unknown) {
-            session.status = artifactStatus;
+        QList<int> sortedIndexes = it.value();
+        std::sort(sortedIndexes.begin(), sortedIndexes.end(), [&](int lhs, int rhs) {
+            const SessionInfo& left = sessions[lhs];
+            const SessionInfo& right = sessions[rhs];
+            if (left.processStartedAt.isValid() && right.processStartedAt.isValid() &&
+                left.processStartedAt != right.processStartedAt) {
+                return left.processStartedAt > right.processStartedAt;
+            }
+            return left.processPid > right.processPid;
+        });
+
+        const int assignCount = qMin(sortedIndexes.size(), candidateIds.size());
+        for (int i = 0; i < assignCount; ++i) {
+            SessionInfo& session = sessions[sortedIndexes.at(i)];
+            session.sessionId = candidateIds.at(i);
+            if (session.sessionPath.isEmpty() && !inferredSessionPath.isEmpty()) {
+                session.sessionPath = inferredSessionPath;
+            }
+            const SessionStatus artifactStatus = inferArtifactStatus(session.toolName,
+                                                                     session.sessionId,
+                                                                     session.sessionPath);
+            if (artifactStatus != SessionStatus::Unknown) {
+                session.status = artifactStatus;
+            }
         }
     }
 }

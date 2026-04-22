@@ -26,6 +26,39 @@ SessionStatus statusFromString(const QString& value)
     return SessionStatus::Unknown;
 }
 
+bool hasKnownRemoteSessionId(const QString& sessionId)
+{
+    return !sessionId.isEmpty() && sessionId != QStringLiteral("unknown");
+}
+
+bool isBetterRemoteSessionCandidate(const SessionInfo& candidate, const SessionInfo& current)
+{
+    if (hasKnownRemoteSessionId(candidate.sessionId) != hasKnownRemoteSessionId(current.sessionId)) {
+        return hasKnownRemoteSessionId(candidate.sessionId);
+    }
+    if (candidate.sessionPath.isEmpty() != current.sessionPath.isEmpty()) {
+        return !candidate.sessionPath.isEmpty();
+    }
+    if (candidate.toolName == QStringLiteral("Codex")) {
+        const bool candidateIsVendor = candidate.detailText.contains("/vendor/");
+        const bool currentIsVendor = current.detailText.contains("/vendor/");
+        if (candidateIsVendor != currentIsVendor) {
+            return candidateIsVendor;
+        }
+    }
+    if (candidate.status != current.status) {
+        return candidate.status == SessionStatus::Working;
+    }
+    if (candidate.lastActivity.isValid() != current.lastActivity.isValid()) {
+        return candidate.lastActivity.isValid();
+    }
+    if (candidate.lastActivity.isValid() && current.lastActivity.isValid() &&
+        candidate.lastActivity != current.lastActivity) {
+        return candidate.lastActivity > current.lastActivity;
+    }
+    return candidate.processPid < current.processPid;
+}
+
 QString remoteProbeCommand(const QString& projectPath)
 {
     return QStringLiteral(R"PYTHON(python3 - %1 <<'PY'
@@ -329,16 +362,14 @@ QList<ProjectMonitorData> RemoteSessionScanner::scanRemoteVault(const Vault& vau
     data.totalReady = 0;
 
     const QJsonArray rows = doc.array();
-    QSet<QString> seen;
+    QMap<QString, SessionInfo> groupedSessions;
     for (const QJsonValue& value : rows) {
         const QJsonObject object = value.toObject();
         const QString toolName = object.value(QStringLiteral("toolName")).toString();
         const QString sessionId = object.value(QStringLiteral("sessionId")).toString(QStringLiteral("unknown"));
-        const QString key = QStringLiteral("%1|%2").arg(toolName, sessionId);
-        if (toolName.isEmpty() || seen.contains(key)) {
+        if (toolName.isEmpty()) {
             continue;
         }
-        seen.insert(key);
 
         SessionInfo session;
         session.sessionId = sessionId;
@@ -360,6 +391,26 @@ QList<ProjectMonitorData> RemoteSessionScanner::scanRemoteVault(const Vault& vau
         session.sessionPath = object.value(QStringLiteral("sessionPath")).toString();
         session.detailText = object.value(QStringLiteral("detailText")).toString();
 
+        const QString dedupeSessionId = hasKnownRemoteSessionId(session.sessionId)
+            ? session.sessionId
+            : (!session.sessionPath.isEmpty()
+                ? session.sessionPath
+                : QStringLiteral("pid-%1").arg(session.processPid));
+        const QString key = QStringLiteral("%1|%2|%3")
+            .arg(vault.path, session.toolName, dedupeSessionId);
+        if (!groupedSessions.contains(key)) {
+            groupedSessions.insert(key, session);
+            continue;
+        }
+
+        const SessionInfo current = groupedSessions.value(key);
+        if (isBetterRemoteSessionCandidate(session, current)) {
+            groupedSessions.insert(key, session);
+        }
+    }
+
+    for (auto it = groupedSessions.cbegin(); it != groupedSessions.cend(); ++it) {
+        const SessionInfo& session = it.value();
         if (session.status == SessionStatus::Working) {
             ++data.totalWorking;
         } else if (session.status == SessionStatus::Ready) {
