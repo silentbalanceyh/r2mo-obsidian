@@ -909,10 +909,6 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
         return artifactStatus;
     }
 
-    if (toolName == "OpenCode" && artifactStatus == SessionStatus::Unknown) {
-        return SessionStatus::Ready;
-    }
-
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
 
     quint64 prevTicks = s_prevCpuTicks.value(pid, 0);

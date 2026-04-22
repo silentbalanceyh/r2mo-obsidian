@@ -20,7 +20,6 @@
 #include <QTimer>
 #include <QFutureWatcher>
 #include <QHash>
-#include <QSet>
 #include <QStringList>
 #include "theme/thememanager.h"
 #include "utils/gitscanner.h"
@@ -143,7 +142,6 @@ private:
     void checkRemoteVaultConnectivityAsync(const QString& vaultPath);
     void applyRemoteConnectivityResult(const QString& vaultPath, bool connected, const QString& errorText);
     QList<ProjectMonitorData> collectRemoteMonitorData() const;
-    QList<ProjectMonitorData> collectMonitorData() const;
     void onPreviewEditClicked();
     void onPreviewOpenClicked();
     void onPreviewTitleEditFinished();
@@ -180,10 +178,7 @@ private:
     void openMonitorTab();
     void addMonitorCloseButton(int tabIndex);
     void refreshMonitorAsync();
-    void startMonitorRefresh(bool initialOpen = false);
-    void applyMonitorRefreshBatch(int generation, const QList<ProjectMonitorData>& data);
-    void finishMonitorRefresh(int generation);
-    QList<QPair<QString, QString>> collectAllProjectPaths() const;
+    QList<QPair<QString, QString>> collectAllProjectPaths();
     QWidget* buildMonitorView(const QList<ProjectMonitorData>& data);
     QWidget* buildSpecialMonitorPanel();
     void updateSpecialMonitorPanelSizing();
@@ -284,9 +279,6 @@ private:
     bool m_monitorRefreshing;
     QLabel *m_monitorProgressLabel;
     int m_monitorProgressStep;
-    int m_monitorRefreshGeneration;
-    QMap<QString, ProjectMonitorData> m_monitorProjectCache;
-    QSet<QString> m_monitorLoadingProjects;
     QTimer *m_memoryUsageTimer;
     QTimer *m_remoteConnectivityTimer;
     QWidget *m_specialMonitorPanel;

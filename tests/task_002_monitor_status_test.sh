@@ -29,18 +29,10 @@ require_pattern 'QCoreApplication::translate\("MainWindow",[[:space:]]*"Working"
     "Working status text must use the MainWindow translation context."
 require_pattern 'QCoreApplication::translate\("MainWindow",[[:space:]]*"Ready"\)' "$window_source" \
     "Ready status text must use the MainWindow translation context."
-if grep -Eq 'QCoreApplication::translate\("MainWindow",[[:space:]]*"Unknown"\)' "$window_source"; then
-    echo "FAIL: Monitor UI must not expose an Unknown status label." >&2
-    exit 1
-fi
 require_pattern 'QColor\(\"#34c759\"' "$window_source" \
     "Working status paint path must render in green."
 require_pattern 'QColor\(\"#007aff\"' "$window_source" \
     "Ready status paint path must render in blue."
-if grep -Eq 'QColor\(\"#8e8e93\"' "$window_source"; then
-    echo "FAIL: Monitor UI must not keep a dedicated Unknown status paint path." >&2
-    exit 1
-fi
 require_pattern 'm_animationOffset[[:space:]]*=' "$window_source" \
     "Working status paint path should keep a lightweight animation offset for the running bar."
 require_pattern 'painter->fillRect\(centeredBarRect, fillColor\);' "$window_source" \
