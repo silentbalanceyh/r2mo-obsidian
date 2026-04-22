@@ -117,6 +117,16 @@ def process_start_time(pid):
     except Exception:
         return 0.0
 
+def process_cpu_ticks(pid):
+    try:
+        stat = read(f'/proc/{pid}/stat')
+        if not stat:
+            return 0
+        parts = stat.split()
+        return int(parts[13]) + int(parts[14])
+    except Exception:
+        return 0
+
 def tool_from_cmd(cmd):
     lower = cmd.lower()
     if 'codex' in lower:
@@ -177,30 +187,46 @@ def latest_opencode_artifact(project):
     return best
 
 def latest_claude_artifact(project):
-    candidates = [normalize_path(project)]
-    try:
-        for entry in os.listdir(project):
-            child = normalize_path(os.path.join(project, entry))
-            if child and os.path.isdir(child):
-                candidates.append(child)
-    except Exception:
-        pass
-
     best = None
-    for candidate in candidates:
-        encoded = '-' + candidate.strip('/').replace('/', '-')
-        project_dir = os.path.expanduser('~/.claude/projects/' + encoded)
-        for path in glob.glob(project_dir + '/*.jsonl'):
-            try:
-                mtime = os.path.getmtime(path)
-                if best is None or mtime > best['mtime']:
-                    best = {
-                        'sessionId': os.path.basename(path).replace('.jsonl', ''),
-                        'sessionPath': path,
-                        'mtime': mtime,
-                    }
-            except Exception:
+    for path in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
+        try:
+            with open(path, 'rb') as f:
+                head = f.read(32768).decode('utf-8', errors='replace').splitlines()
+            cwd = ''
+            session_id = ''
+            for line in head[:12]:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                session_id = obj.get('sessionId') or obj.get('session_id') or session_id
+                cwd = normalize_path(
+                    obj.get('cwd')
+                    or (obj.get('attachment') or {}).get('cwd')
+                    or (obj.get('message') or {}).get('cwd')
+                    or ''
+                )
+                if cwd:
+                    break
+            if not cwd:
                 continue
+            if not (path_belongs_to_project(cwd, project) or path_belongs_to_project(project, cwd)):
+                continue
+            mtime = os.path.getmtime(path)
+            session_path = path
+            if '/subagents/' in path and session_id:
+                primary_path = os.path.join(os.path.dirname(os.path.dirname(path)), session_id + '.jsonl')
+                if os.path.exists(primary_path):
+                    session_path = primary_path
+                    mtime = max(mtime, os.path.getmtime(primary_path))
+            if best is None or mtime > best['mtime']:
+                best = {
+                    'sessionId': session_id or os.path.basename(session_path).replace('.jsonl', ''),
+                    'sessionPath': session_path,
+                    'mtime': mtime,
+                }
+        except Exception:
+            continue
     return best
 
 def artifact_status(path, tool):
@@ -215,6 +241,7 @@ def artifact_status(path, tool):
         if obj.get('ended_at') or obj.get('endedAt') or obj.get('reason'):
             return 'ready'
         return 'working' if now - os.path.getmtime(path) <= 10 else 'unknown'
+    mtime_is_fresh = (now - os.path.getmtime(path)) <= 8
     try:
         with open(path, 'rb') as f:
             f.seek(0, os.SEEK_END)
@@ -229,17 +256,44 @@ def artifact_status(path, tool):
         except Exception:
             continue
         typ = obj.get('type', '')
+        event_time = None
+        for key in ('timestamp', 'time', 'created_at'):
+            raw = obj.get(key)
+            if isinstance(raw, str) and raw:
+                try:
+                    from datetime import datetime, timezone
+                    normalized = raw.replace('Z', '+00:00')
+                    event_time = datetime.fromisoformat(normalized)
+                    if event_time.tzinfo is None:
+                        event_time = event_time.replace(tzinfo=timezone.utc)
+                    break
+                except Exception:
+                    event_time = None
+        event_is_fresh = False
+        if event_time is not None:
+            event_is_fresh = (time.time() - event_time.timestamp()) <= 8
         if tool == 'Codex':
             if typ == 'task_complete':
-                return 'ready'
+                return 'working' if mtime_is_fresh else 'ready'
             if typ == 'task_started':
-                return 'working' if now - os.path.getmtime(path) <= 10 else 'ready'
+                return 'working' if event_is_fresh else 'ready'
             payload = obj.get('payload') or {}
             payload_type = payload.get('type', '')
             if payload_type in ('exec_command_begin', 'function_call_begin', 'patch_apply_begin', 'agent_reasoning'):
-                return 'working' if now - os.path.getmtime(path) <= 10 else 'ready'
+                return 'working' if event_is_fresh else 'ready'
             if payload_type in ('exec_command_end', 'function_call_output', 'patch_apply_end', 'user_message', 'message'):
                 return 'ready'
+            if typ == 'response_item':
+                if payload_type in ('function_call', 'custom_tool_call', 'reasoning'):
+                    return 'working' if event_is_fresh else 'ready'
+                if payload_type == 'function_call_output':
+                    return 'ready'
+                if payload_type == 'message':
+                    phase = payload.get('phase', '')
+                    if not phase or phase == 'final_answer':
+                        return 'ready'
+                    if phase == 'commentary':
+                        return 'working' if event_is_fresh else 'ready'
         if tool == 'Claude':
             if typ == 'assistant':
                 stop_reason = (obj.get('message') or {}).get('stop_reason', '')
@@ -250,7 +304,7 @@ def artifact_status(path, tool):
             attachment = obj.get('attachment') or {}
             hook = attachment.get('hookEvent', '')
             if hook in ('PreToolUse', 'PostToolUse'):
-                return 'working' if now - os.path.getmtime(path) <= 10 else 'ready'
+                return 'working' if event_is_fresh else 'ready'
             if hook == 'Stop' or attachment.get('type') in ('hook_success', 'async_hook_response'):
                 return 'ready'
             if typ == 'system' and obj.get('subtype') in ('turn_duration', 'away_summary'):
@@ -259,7 +313,8 @@ def artifact_status(path, tool):
 
 rows = []
 artifact_cache = {}
-found_opencode_row = False
+cpu_samples_before = {}
+candidate_pids = []
 for pid in filter(str.isdigit, os.listdir('/proc')):
     cmdline = read(f'/proc/{pid}/cmdline').replace('\x00', ' ').strip()
     comm = read(f'/proc/{pid}/comm').strip()
@@ -270,6 +325,13 @@ for pid in filter(str.isdigit, os.listdir('/proc')):
     cwd = readlink(f'/proc/{pid}/cwd')
     if not path_belongs_to_project(cwd, project_path):
         continue
+    candidate_pids.append((pid, tool, cwd, cmd))
+    cpu_samples_before[int(pid)] = process_cpu_ticks(pid)
+
+time.sleep(2.0)
+cpu_samples_after = {int(pid): process_cpu_ticks(pid) for pid, _, _, _ in candidate_pids}
+
+for pid, tool, cwd, cmd in candidate_pids:
     if tool == 'Codex' and 'claude-mem' in cmd:
         continue
     if tool == 'Claude' and 'claude-mem' in cmd:
@@ -285,8 +347,10 @@ for pid in filter(str.isdigit, os.listdir('/proc')):
         artifact_cache[artifact_key] = artifact
     started = process_start_time(pid)
     mtime = artifact.get('mtime') if artifact else started
-    if tool == 'OpenCode':
-        found_opencode_row = True
+    cpu_delta = max(0, cpu_samples_after.get(int(pid), 0) - cpu_samples_before.get(int(pid), 0))
+    status = artifact_status((artifact or {}).get('sessionPath') or '', tool)
+    if cpu_delta > 0:
+        status = 'working'
     rows.append({
         'toolName': tool,
         'sessionId': (artifact or {}).get('sessionId') or 'unknown',
@@ -297,31 +361,11 @@ for pid in filter(str.isdigit, os.listdir('/proc')):
         'terminalName': 'SSH',
         'sessionPath': (artifact or {}).get('sessionPath') or '',
         'detailText': cmd,
-        'status': artifact_status((artifact or {}).get('sessionPath') or '', tool),
+        'status': status,
         'lastActivityEpoch': mtime,
         'processStartedEpoch': started,
         'runtimeSeconds': int(max(0, now - (started or now))),
     })
-
-if not found_opencode_row:
-    artifact = latest_opencode_artifact(project_path)
-    if artifact:
-        mtime = artifact.get('mtime') or now
-        rows.append({
-            'toolName': 'OpenCode',
-            'sessionId': artifact.get('sessionId') or 'unknown',
-            'projectPath': normalize_path(project_path),
-            'processPid': 0,
-            'shellPid': 0,
-            'terminalPid': 0,
-            'terminalName': 'SSH',
-            'sessionPath': artifact.get('sessionPath') or '',
-            'detailText': 'OpenCode session artifact',
-            'status': artifact_status(artifact.get('sessionPath') or '', 'OpenCode'),
-            'lastActivityEpoch': mtime,
-            'processStartedEpoch': mtime,
-            'runtimeSeconds': int(max(0, now - mtime)),
-        })
 
 print(json.dumps(rows, ensure_ascii=False))
 PY)PYTHON").arg(shellQuote(projectPath));

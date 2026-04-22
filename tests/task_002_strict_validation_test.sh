@@ -14,7 +14,7 @@ pass_count=0
 run_case() {
     local name="$1"
     shift
-    printf '[%02d/20] %s\n' "$((pass_count + 1))" "$name"
+    printf '[%02d/24] %s\n' "$((pass_count + 1))" "$name"
     "$@"
     pass_count=$((pass_count + 1))
 }
@@ -32,6 +32,9 @@ require_pattern() {
 run_case "Task-002 Codex status guards" \
     bash "$repo_root/tests/task_002_codex_status_guard_test.sh"
 
+run_case "Task-002 monitor layout height guards" \
+    bash "$repo_root/tests/task_002_monitor_layout_height_test.sh"
+
 run_case "Task-002 monitor status guards" \
     bash "$repo_root/tests/task_002_monitor_status_test.sh"
 
@@ -43,6 +46,9 @@ run_case "Task-002 remote repository selector guards" \
 
 run_case "Task-002 terminal icon guards" \
     bash "$repo_root/tests/task_002_terminal_icon_guard_test.sh"
+
+run_case "Task-002 remote status guards" \
+    bash "$repo_root/tests/task_002_remote_status_guard_test.sh"
 
 run_case "Remote monitor scanner guards" \
     bash "$repo_root/tests/task_001_remote_monitor_session_test.sh"
@@ -115,4 +121,4 @@ PY
 run_case "Remote SSH probe returns live monitor tools" \
     bash -lc "ssh -o BatchMode=yes -o StrictHostKeyChecking=no lang@mxt.webos.cn \"python3 - /media/psf/r2mo-apps/app-webos\" < /tmp/remote_opencode_probe.py | grep -Eq 'Codex|Claude|OpenCode'"
 
-echo "PASS: 20/20 strict task-002 validation cases succeeded."
+echo "PASS: 24/24 strict task-002 validation cases succeeded."

@@ -10,6 +10,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QtConcurrent>
 
 namespace {
 qint64 jsonLongLong(const QJsonValue& value)
@@ -26,20 +27,33 @@ int jsonInt(const QJsonValue& value)
 QList<SpecialMonitorSnapshot> SpecialMonitorFetcher::fetchSnapshots(
     const QList<SpecialMonitorSource>& sources) const
 {
-    QList<SpecialMonitorSnapshot> snapshots;
+    QList<QFuture<SpecialMonitorSnapshot>> futures;
+    futures.reserve(sources.size());
     for (const SpecialMonitorSource& source : sources) {
-        const QString normalizedUrl = normalizeBaseUrl(source.baseUrl);
-        if (normalizedUrl == "https://code.ppchat.vip") {
-            snapshots.append(fetchPPCodingSnapshot(source));
-            continue;
-        }
+        futures.append(QtConcurrent::run([this, source]() {
+            return fetchSnapshot(source);
+        }));
+    }
 
-        SpecialMonitorSnapshot snapshot;
-        snapshot.source = source;
-        snapshot.errorMessage = QStringLiteral("Unsupported provider");
-        snapshots.append(snapshot);
+    QList<SpecialMonitorSnapshot> snapshots;
+    snapshots.reserve(futures.size());
+    for (QFuture<SpecialMonitorSnapshot>& future : futures) {
+        snapshots.append(future.result());
     }
     return snapshots;
+}
+
+SpecialMonitorSnapshot SpecialMonitorFetcher::fetchSnapshot(const SpecialMonitorSource& source) const
+{
+    const QString normalizedUrl = normalizeBaseUrl(source.baseUrl);
+    if (normalizedUrl == "https://code.ppchat.vip") {
+        return fetchPPCodingSnapshot(source);
+    }
+
+    SpecialMonitorSnapshot snapshot;
+    snapshot.source = source;
+    snapshot.errorMessage = QStringLiteral("Unsupported provider");
+    return snapshot;
 }
 
 QString SpecialMonitorFetcher::normalizeBaseUrl(const QString& baseUrl)
