@@ -185,6 +185,7 @@ private:
     void refreshSpecialMonitorAsync(bool force = true);
     void setSpecialMonitorActionsEnabled(bool enabled);
     void setSpecialMonitorRefreshLoading(bool loading);
+    void setSpecialMonitorRowsLoading(bool loading);
     void updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& snapshots);
     void updateSpecialMonitorTableColumns();
     void addSpecialMonitorSource();

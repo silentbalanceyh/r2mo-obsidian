@@ -1262,7 +1262,7 @@ void MainWindow::setupConnections()
             m_specialMonitorDataCache.capturedAt = QDateTime::currentDateTime();
             updateSpecialMonitorTable(m_specialMonitorDataCache.data);
             setSpecialMonitorActionsEnabled(true);
-            setSpecialMonitorRefreshLoading(false);
+            setSpecialMonitorRowsLoading(false);
             m_specialMonitorRefreshing = false;
         }
     });
@@ -2538,7 +2538,7 @@ void MainWindow::refreshSpecialMonitorAsync(bool force)
     m_specialMonitorRefreshing = true;
     m_specialMonitorStatusLabel->setText(tr("Refreshing..."));
     setSpecialMonitorActionsEnabled(false);
-    setSpecialMonitorRefreshLoading(true);
+    setSpecialMonitorRowsLoading(true);
     QFuture<QList<SpecialMonitorSnapshot>> future = QtConcurrent::run([sources]() {
         SpecialMonitorFetcher fetcher;
         return fetcher.fetchSnapshots(sources);
@@ -2568,17 +2568,48 @@ void MainWindow::setSpecialMonitorActionsEnabled(bool enabled)
 
 void MainWindow::setSpecialMonitorRefreshLoading(bool loading)
 {
-    if (!m_specialMonitorPanel) {
+    setSpecialMonitorRowsLoading(loading);
+}
+
+void MainWindow::setSpecialMonitorRowsLoading(bool loading)
+{
+    if (!m_specialMonitorPanel || !m_specialMonitorTable) {
         return;
     }
 
-    QWidget *overlay = m_specialMonitorPanel->findChild<QWidget*>("specialMonitorRefreshOverlay");
-    if (!overlay) {
-        return;
+    static const QStringList loadingFrames = {
+        QStringLiteral("◐"),
+        QStringLiteral("◓"),
+        QStringLiteral("◑"),
+        QStringLiteral("◒")
+    };
+
+    if (loading) {
+        ++m_monitorProgressStep;
+    }
+    const QString frame = loadingFrames.at(m_monitorProgressStep % loadingFrames.size());
+
+    for (int row = 0; row < m_specialMonitorTable->rowCount(); ++row) {
+        QTableWidgetItem *providerItem = m_specialMonitorTable->item(row, 0);
+        if (providerItem) {
+            const QString providerName = providerItem->data(Qt::UserRole).toString().isEmpty()
+                ? providerItem->text()
+                : providerItem->data(Qt::UserRole).toString();
+            providerItem->setData(Qt::UserRole, providerName);
+            providerItem->setText(loading ? QStringLiteral("%1 %2").arg(frame, providerName) : providerName);
+        }
+
+        if (QWidget *tokenWidget = m_specialMonitorTable->cellWidget(row, 1)) {
+            tokenWidget->setEnabled(!loading);
+        }
+        for (int col = 2; col < m_specialMonitorTable->columnCount(); ++col) {
+            if (QTableWidgetItem *item = m_specialMonitorTable->item(row, col)) {
+                item->setForeground(loading ? QBrush(QColor("#86868b")) : QBrush(QColor("#1d1d1f")));
+            }
+        }
     }
 
-    overlay->setVisible(loading);
-    overlay->raise();
+    m_specialMonitorTable->viewport()->update();
 }
 
 void MainWindow::updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& snapshots)
@@ -2610,7 +2641,9 @@ void MainWindow::updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& 
         const QString typeLabel = snapshot.packageType.isEmpty() ? tr("Unknown") : snapshot.packageType;
         const QString accountLabel = snapshot.accountName.isEmpty() ? tr("Unknown") : snapshot.accountName;
 
-        m_specialMonitorTable->setItem(row, 0, makeItem(provider));
+        QTableWidgetItem *providerItem = makeItem(provider);
+        providerItem->setData(Qt::UserRole, provider);
+        m_specialMonitorTable->setItem(row, 0, providerItem);
         QTableWidgetItem *tokenItem = makeItem(QString());
         tokenItem->setToolTip(QString());
         m_specialMonitorTable->setItem(row, 1, tokenItem);
@@ -2852,36 +2885,7 @@ QWidget* MainWindow::buildSpecialMonitorPanel()
         m_settingsManager->setSpecialMonitorHeaderState(m_specialMonitorTable->horizontalHeader()->saveState());
         m_settingsManager->sync();
     });
-    QWidget *tableHost = new QWidget(panel);
-    tableHost->setObjectName("specialMonitorTableHost");
-    QStackedLayout *tableHostLayout = new QStackedLayout(tableHost);
-    tableHostLayout->setContentsMargins(0, 0, 0, 0);
-    tableHostLayout->setStackingMode(QStackedLayout::StackAll);
-    tableHostLayout->addWidget(m_specialMonitorTable);
-
-    QWidget *refreshOverlay = new QWidget(tableHost);
-    refreshOverlay->setObjectName("specialMonitorRefreshOverlay");
-    refreshOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-    refreshOverlay->setStyleSheet("QWidget#specialMonitorRefreshOverlay { background: rgba(250, 250, 250, 214); border: 1px solid #e8e8ed; border-radius: 6px; }");
-    QVBoxLayout *overlayLayout = new QVBoxLayout(refreshOverlay);
-    overlayLayout->setAlignment(Qt::AlignCenter);
-    overlayLayout->setSpacing(10);
-
-    QLabel *overlayTitle = new QLabel(tr("Refreshing..."), refreshOverlay);
-    overlayTitle->setAlignment(Qt::AlignCenter);
-    overlayTitle->setStyleSheet("QLabel { color: #1d1d1f; font-size: 14px; font-weight: 600; background: transparent; }");
-    overlayLayout->addWidget(overlayTitle);
-
-    QProgressBar *overlayProgress = new QProgressBar(refreshOverlay);
-    overlayProgress->setRange(0, 0);
-    overlayProgress->setFixedWidth(220);
-    overlayProgress->setTextVisible(false);
-    overlayProgress->setStyleSheet("QProgressBar { border: 1px solid #d0d0d7; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #34c759; border-radius: 3px; }");
-    overlayLayout->addWidget(overlayProgress);
-
-    tableHostLayout->addWidget(refreshOverlay);
-    refreshOverlay->hide();
-    layout->addWidget(tableHost, 1);
+    layout->addWidget(m_specialMonitorTable, 1);
 
     updateSpecialMonitorTable({});
 
@@ -4981,6 +4985,18 @@ void MainWindow::setMonitorRowsLoading(bool loading)
         return;
     }
 
+    static const QStringList loadingFrames = {
+        QStringLiteral("◐"),
+        QStringLiteral("◓"),
+        QStringLiteral("◑"),
+        QStringLiteral("◒")
+    };
+
+    if (loading) {
+        ++m_monitorProgressStep;
+    }
+    const QString frame = loadingFrames.at(m_monitorProgressStep % loadingFrames.size());
+
     for (int i = 0; i < tree->topLevelItemCount(); ++i) {
         QTreeWidgetItem *row = tree->topLevelItem(i);
         if (!row) {
@@ -4989,7 +5005,7 @@ void MainWindow::setMonitorRowsLoading(bool loading)
 
         const QString sessionId = row->data(0, kMonitorSessionIdRole).toString();
         const QString displaySessionId = sessionId.isEmpty() ? tr("No Session") : sessionId;
-        row->setText(3, loading ? QStringLiteral("◌ %1").arg(displaySessionId) : displaySessionId);
+        row->setText(3, loading ? QStringLiteral("%1 %2").arg(frame, displaySessionId) : displaySessionId);
     }
 
     tree->viewport()->update();
