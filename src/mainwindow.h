@@ -194,6 +194,7 @@ private:
     void replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab);
     void setMonitorRefreshEnabled(bool enabled);
     void setMonitorRefreshLoading(bool loading);
+    void setMonitorRowsLoading(bool loading);
     QString formatSessionRuntime(qint64 runtimeSeconds) const;
     bool updateMonitorStatusCells(const QList<ProjectMonitorData>& data);
     QString monitorRowKey(const QString& projectPath, const SessionInfo& session) const;

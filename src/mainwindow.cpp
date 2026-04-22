@@ -1250,7 +1250,7 @@ void MainWindow::setupConnections()
                 replaceMonitorContent(newWidget, true);
             }
             setMonitorRefreshEnabled(true);
-            setMonitorRefreshLoading(false);
+            setMonitorRowsLoading(false);
             m_monitorRefreshing = false;
         }
     });
@@ -4942,7 +4942,7 @@ void MainWindow::refreshMonitorAsync()
 
     m_monitorRefreshing = true;
     setMonitorRefreshEnabled(false);
-    setMonitorRefreshLoading(true);
+    setMonitorRowsLoading(true);
 
     QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
         QList<QPair<QString, QString>> projects = collectAllProjectPaths();
@@ -4967,17 +4967,32 @@ void MainWindow::setMonitorRefreshEnabled(bool enabled)
 
 void MainWindow::setMonitorRefreshLoading(bool loading)
 {
+    setMonitorRowsLoading(loading);
+}
+
+void MainWindow::setMonitorRowsLoading(bool loading)
+{
     if (!m_monitorTabContent) {
         return;
     }
 
-    QWidget *overlay = m_monitorTabContent->findChild<QWidget*>("monitorRefreshOverlay");
-    if (!overlay) {
+    QTreeWidget *tree = m_monitorTabContent->findChild<QTreeWidget*>("monitorBoardTree");
+    if (!tree) {
         return;
     }
 
-    overlay->setVisible(loading);
-    overlay->raise();
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *row = tree->topLevelItem(i);
+        if (!row) {
+            continue;
+        }
+
+        const QString sessionId = row->data(0, kMonitorSessionIdRole).toString();
+        const QString displaySessionId = sessionId.isEmpty() ? tr("No Session") : sessionId;
+        row->setText(3, loading ? QStringLiteral("◌ %1").arg(displaySessionId) : displaySessionId);
+    }
+
+    tree->viewport()->update();
 }
 
 QString MainWindow::formatSessionRuntime(qint64 runtimeSeconds) const
@@ -5309,37 +5324,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
         "QSplitter::handle:vertical:hover { background: #d0d0d7; }");
     m_specialMonitorPanelUserResized = false;
 
-    QWidget *tableStack = new QWidget(container);
-    tableStack->setObjectName("monitorRefreshTableHost");
-    QStackedLayout *tableStackLayout = new QStackedLayout(tableStack);
-    tableStackLayout->setContentsMargins(0, 0, 0, 0);
-    tableStackLayout->setStackingMode(QStackedLayout::StackAll);
-    tableStackLayout->addWidget(tree);
-
-    QWidget *refreshOverlay = new QWidget(tableStack);
-    refreshOverlay->setObjectName("monitorRefreshOverlay");
-    refreshOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-    refreshOverlay->setStyleSheet("QWidget#monitorRefreshOverlay { background: rgba(255, 255, 255, 210); border: 1px solid #e8e8ed; border-radius: 6px; }");
-    QVBoxLayout *overlayLayout = new QVBoxLayout(refreshOverlay);
-    overlayLayout->setAlignment(Qt::AlignCenter);
-    overlayLayout->setSpacing(10);
-
-    QLabel *overlayTitle = new QLabel(tr("Refreshing..."), refreshOverlay);
-    overlayTitle->setAlignment(Qt::AlignCenter);
-    overlayTitle->setStyleSheet("QLabel { color: #1d1d1f; font-size: 15px; font-weight: 600; background: transparent; }");
-    overlayLayout->addWidget(overlayTitle);
-
-    QProgressBar *overlayProgress = new QProgressBar(refreshOverlay);
-    overlayProgress->setRange(0, 0);
-    overlayProgress->setFixedWidth(240);
-    overlayProgress->setTextVisible(false);
-    overlayProgress->setStyleSheet("QProgressBar { border: 1px solid #d0d0d7; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #007aff; border-radius: 3px; }");
-    overlayLayout->addWidget(overlayProgress);
-
-    tableStackLayout->addWidget(refreshOverlay);
-    refreshOverlay->hide();
-
-    m_monitorVerticalSplitter->addWidget(tableStack);
+    m_monitorVerticalSplitter->addWidget(tree);
     m_specialMonitorPanel = buildSpecialMonitorPanel();
     m_monitorVerticalSplitter->addWidget(m_specialMonitorPanel);
     connect(m_monitorVerticalSplitter, &QSplitter::splitterMoved, this, [this]() {

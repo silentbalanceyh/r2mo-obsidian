@@ -4,7 +4,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 header="$repo_root/src/mainwindow.h"
 source="$repo_root/src/mainwindow.cpp"
-settings_source="$repo_root/src/utils/settingsmanager.cpp"
 
 require_pattern() {
     local pattern="$1"
@@ -29,21 +28,19 @@ forbid_pattern() {
 }
 
 require_pattern 'void[[:space:]]+setMonitorRefreshLoading[[:space:]]*\([[:space:]]*bool[[:space:]]+loading[[:space:]]*\)' "$header" \
-    "MainWindow must expose an internal helper to toggle the monitor table refresh loading overlay."
+    "MainWindow must expose an internal helper to toggle monitor refresh loading."
+require_pattern 'void[[:space:]]+setMonitorRowsLoading[[:space:]]*\([[:space:]]*bool[[:space:]]+loading[[:space:]]*\)' "$header" \
+    "MainWindow must expose a row-level monitor loading helper."
 require_pattern 'void[[:space:]]+setMonitorRefreshEnabled[[:space:]]*\([[:space:]]*bool[[:space:]]+enabled[[:space:]]*\)' "$header" \
     "MainWindow must expose an internal helper to enable or disable the monitor refresh trigger."
-require_pattern 'setObjectName[[:space:]]*\([[:space:]]*"monitorRefreshOverlay"[[:space:]]*\)' "$source" \
-    "Monitor table view must create a named loading overlay for refresh feedback."
-require_pattern 'setObjectName[[:space:]]*\([[:space:]]*"monitorRefreshTableHost"[[:space:]]*\)' "$source" \
-    "Monitor table refresh overlay must be attached to the top table host, not the whole board."
-require_pattern 'm_monitorVerticalSplitter->addWidget[[:space:]]*\([[:space:]]*tableStack[[:space:]]*\)' "$source" \
-    "Top monitor table host must be the splitter child so the special billing panel keeps its own loading behavior."
-require_pattern 'mainLayout->addWidget[[:space:]]*\([[:space:]]*m_monitorVerticalSplitter[[:space:]]*,[[:space:]]*1[[:space:]]*\)' "$source" \
-    "The splitter must remain the board container after isolating the top-table overlay."
-require_pattern 'setMonitorRefreshLoading[[:space:]]*\([[:space:]]*true[[:space:]]*\)' "$source" \
-    "Manual monitor refresh must show the loading overlay before async scanning starts."
-require_pattern 'setMonitorRefreshLoading[[:space:]]*\([[:space:]]*false[[:space:]]*\)' "$source" \
-    "Monitor scan completion must hide the loading overlay."
+forbid_pattern 'monitorRefreshOverlay' "$source" \
+    "Main monitor loading must not use a full-table overlay."
+forbid_pattern 'monitorRefreshTableHost' "$source" \
+    "Main monitor loading must not rebuild the table into an overlay host."
+require_pattern 'setMonitorRowsLoading[[:space:]]*\([[:space:]]*true[[:space:]]*\)' "$source" \
+    "Manual monitor refresh must enable row-level loading before async scanning starts."
+require_pattern 'setMonitorRowsLoading[[:space:]]*\([[:space:]]*false[[:space:]]*\)' "$source" \
+    "Monitor scan completion must clear row-level loading after async scanning ends."
 require_pattern 'setMonitorRefreshEnabled[[:space:]]*\([[:space:]]*false[[:space:]]*\)' "$source" \
     "Manual monitor refresh must disable its refresh button during loading."
 require_pattern 'setMonitorRefreshEnabled[[:space:]]*\([[:space:]]*true[[:space:]]*\)' "$source" \
@@ -52,36 +49,18 @@ require_pattern 'connect[[:space:]]*\([[:space:]]*refreshBtn[[:space:]]*,[[:spac
     "Refresh button must be connected directly, not through an indirect child lookup."
 require_pattern 'setObjectName[[:space:]]*\([[:space:]]*"monitorRefreshButton"[[:space:]]*\)' "$source" \
     "Monitor refresh button must have a stable object name so its enabled state can be managed."
-require_pattern 'QProgressBar[^\\n]*statusBar' "$source" \
-    "Monitor row status must be rendered with progress bars instead of simple dots."
-require_pattern 'setObjectName[[:space:]]*\([[:space:]]*"monitorStatusBar"[[:space:]]*\)' "$source" \
-    "Monitor status progress bars must use a stable object name."
-require_pattern 'setFixedWidth[[:space:]]*\([[:space:]]*256[[:space:]]*\)' "$source" \
-    "Monitor status progress bars must be widened to double the previous width."
-require_pattern 'statusWidth[[:space:]]*=.*304.*336' "$source" \
-    "Monitor status column width must be expanded to fit the wider bar and visible status text."
-require_pattern 'minStatusWidth[[:space:]]*=[[:space:]]*280' "$source" \
-    "Monitor status column minimum width must prevent the column from collapsing below the control width."
-require_pattern 'monitorBoardHeaderState\\.v3' "$settings_source" \
-    "Monitor board header persistence version must be bumped so stale saved widths do not override the new status column layout."
-require_pattern 'QLabel[^\\n]*statusTextLabel' "$source" \
-    "Monitor status presentation must preserve visible status text beside the progress bar."
-require_pattern 'setObjectName[[:space:]]*\([[:space:]]*"monitorStatusText"[[:space:]]*\)' "$source" \
-    "Monitor status text labels must use a stable object name."
-require_pattern 'setRange[[:space:]]*\([[:space:]]*0[[:space:]]*,[[:space:]]*0[[:space:]]*\)' "$source" \
-    "Working state must use an indeterminate progress bar."
-require_pattern 'setRange[[:space:]]*\([[:space:]]*0[[:space:]]*,[[:space:]]*100[[:space:]]*\)' "$source" \
-    "Ready state must use a bounded progress bar."
-require_pattern 'setValue[[:space:]]*\([[:space:]]*0[[:space:]]*\)' "$source" \
-    "Ready state must show a blocked or empty progress bar."
-require_pattern '#d9ecff' "$source" \
-    "Ready state must use a blue waiting-style progress bar instead of a grey disabled look."
-require_pattern 'setProperty[[:space:]]*\([[:space:]]*"slowMode"[[:space:]]*,[[:space:]]*true[[:space:]]*\)' "$source" \
-    "Working monitor bars must be marked for slower animation handling."
-forbid_pattern 'auto createLegend' "$source" \
-    "Monitor board should no longer render the top legend/status indicator strip."
-forbid_pattern 'legendLayout->addWidget\\(createLegend' "$source" \
-    "Monitor board should no longer add the removed top legend widgets."
+require_pattern 'QStringLiteral\("◌ %1"\)' "$source" \
+    "Row-level loading must prefix the session column with the loading marker."
+require_pattern 'row->setText\(3,[[:space:]]*loading[[:space:]]*\?[[:space:]]*QStringLiteral\("◌ %1"\)' "$source" \
+    "Main monitor loading must only change the existing row session text."
+forbid_pattern 'struct[[:space:]]+MonitorRowSnapshot' "$header" \
+    "Main monitor loading must not introduce a shadow row model that can drift from real session data."
+forbid_pattern 'collectMonitorRowSnapshots' "$header" \
+    "Main monitor loading must not synthesize placeholder monitor rows."
+forbid_pattern 'collectMonitorRowSnapshotMap' "$header" \
+    "Main monitor loading must not synthesize placeholder monitor rows."
+forbid_pattern 'updateMonitorTreeRows' "$header" \
+    "Main monitor loading must not rebuild tree rows through a synthetic snapshot layer."
 require_pattern 'm_specialMonitorStatusLabel->setText[[:space:]]*\([[:space:]]*tr\("Refreshing\.\.\."\)[[:space:]]*\)' "$source" \
     "Special billing refresh must keep its own status-label loading state."
 require_pattern 'void[[:space:]]+setSpecialMonitorRefreshLoading[[:space:]]*\([[:space:]]*bool[[:space:]]+loading[[:space:]]*\)' "$header" \
@@ -117,4 +96,4 @@ require_pattern 'setObjectName[[:space:]]*\([[:space:]]*"specialMonitorRemoveBut
 require_pattern 'setObjectName[[:space:]]*\([[:space:]]*"specialMonitorRefreshButton"[[:space:]]*\)' "$source" \
     "Special billing Refresh button must have a stable object name."
 
-echo "PASS: monitor refresh loading overlay wiring is present."
+echo "PASS: monitor refresh row-loading guard rails are present."
