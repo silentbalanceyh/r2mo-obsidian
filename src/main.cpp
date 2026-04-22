@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
 
     MainWindow window;
     window.setWindowTitle(QApplication::translate("MainWindow", "Obsidian Manager - Vault Center"));
-    window.resize(1680, 1050);
+    window.resize(1680, 900);
     window.show();
 
     return app.exec();
