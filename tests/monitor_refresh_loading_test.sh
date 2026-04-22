@@ -43,13 +43,6 @@ require_pattern 'QList<ProjectMonitorData>[[:space:]]+placeholderData' "$source"
     "Opening the monitor board should prepare placeholder rows immediately."
 require_pattern 'buildMonitorView\(placeholderData\)' "$source" \
     "Monitor board must render project placeholders on first open."
-require_pattern 'm_monitorRefreshTimer->setInterval\(60[[:space:]]*\*[[:space:]]*1000\)' "$source" \
-    "Monitor refresh cadence should be reduced to one minute."
-project_collection_body="$(awk '/QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths\(\)/,/^}/' "$source")"
-if grep -Eq 'scanVault\(vault\.path\)' <<< "$project_collection_body"; then
-    echo "FAIL: Monitor project collection should not expand into subprojects anymore." >&2
-    exit 1
-fi
 require_pattern 'pmd\.sessions\.isEmpty\(\)' "$source" \
     "Monitor board must keep project placeholder rows when sessions are still loading."
 require_pattern 'row->setData\(0,[[:space:]]*kMonitorLoadingRole' "$source" \

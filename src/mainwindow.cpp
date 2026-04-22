@@ -1262,9 +1262,9 @@ void MainWindow::setupConnections()
         }
     });
     
-    // Monitor refresh timer (1 minute)
+    // Monitor refresh timer (10 seconds)
     m_monitorRefreshTimer = new QTimer(this);
-    m_monitorRefreshTimer->setInterval(60 * 1000);
+    m_monitorRefreshTimer->setInterval(10000);
     connect(m_monitorRefreshTimer, &QTimer::timeout, this, &MainWindow::onMonitorRefresh);
     m_monitorRefreshTimer->stop();
 
@@ -4831,6 +4831,21 @@ QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths()
         if (!seenPaths.contains(normalizedVaultPath)) {
             result.append(qMakePair(vault.name, normalizedVaultPath));
             seenPaths.insert(normalizedVaultPath);
+        }
+
+        if (!m_vaultValidator->hasR2moConfig(vault.path)) {
+            continue;
+        }
+
+        R2moScanner scanner;
+        QList<R2moSubProject> projects = scanner.scanVault(vault.path);
+        for (const R2moSubProject& proj : projects) {
+            const QString normalizedProjectPath = QDir::cleanPath(proj.path);
+            if (seenPaths.contains(normalizedProjectPath)) {
+                continue;
+            }
+            result.append(qMakePair(proj.name, normalizedProjectPath));
+            seenPaths.insert(normalizedProjectPath);
         }
     }
 
