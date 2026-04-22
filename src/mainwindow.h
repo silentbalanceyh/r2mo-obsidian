@@ -183,9 +183,7 @@ private:
     void startMonitorRefresh(bool initialOpen = false);
     void applyMonitorRefreshBatch(int generation, const QList<ProjectMonitorData>& data);
     void finishMonitorRefresh(int generation);
-    QList<QPair<QString, QString>> collectMonitorDisplayProjectPaths() const;
     QList<QPair<QString, QString>> collectAllProjectPaths() const;
-    QPair<QString, QString> monitorDisplayProjectForPath(const QString& projectPath) const;
     QWidget* buildMonitorView(const QList<ProjectMonitorData>& data);
     QWidget* buildSpecialMonitorPanel();
     void updateSpecialMonitorPanelSizing();

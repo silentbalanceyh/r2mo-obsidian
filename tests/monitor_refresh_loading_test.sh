@@ -58,7 +58,7 @@ require_pattern 'kMonitorLoadingRole' "$source" \
     "Monitor rows must carry an inline refreshing state."
 require_pattern 'kMonitorPlaceholderRole' "$source" \
     "Placeholder rows must be distinguishable from real session rows."
-require_pattern 'buildMonitorView\(displayPlaceholders\)' "$source" \
+require_pattern 'buildMonitorView\(placeholders\)' "$source" \
     "Initial monitor opening must render project rows immediately instead of an empty table."
 require_pattern 'createMonitorLoadingIcon' "$source" \
     "Monitor row refresh feedback should be a compact project-column indicator."
