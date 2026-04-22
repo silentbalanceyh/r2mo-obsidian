@@ -117,6 +117,16 @@ def process_start_time(pid):
     except Exception:
         return 0.0
 
+def process_parent_pid(pid):
+    try:
+        stat = read(f'/proc/{pid}/stat')
+        if not stat:
+            return 0
+        parts = stat.split()
+        return int(parts[3])
+    except Exception:
+        return 0
+
 def tool_from_cmd(cmd):
     lower = cmd.lower()
     if 'codex' in lower:
@@ -275,6 +285,17 @@ def artifact_status(path, tool):
                 return 'ready'
     return 'ready'
 
+def has_tool_ancestor(pid):
+    ancestor = process_parent_pid(pid)
+    visited = set()
+    while ancestor > 1 and ancestor not in visited:
+        visited.add(ancestor)
+        parent_cmd = read(f'/proc/{ancestor}/cmdline').replace('\x00', ' ').strip() or read(f'/proc/{ancestor}/comm').strip()
+        if tool_from_cmd(parent_cmd):
+            return True
+        ancestor = process_parent_pid(ancestor)
+    return False
+
 rows = []
 artifact_cache = {}
 found_opencode_row = False
@@ -291,6 +312,8 @@ for pid in filter(str.isdigit, os.listdir('/proc')):
     if tool == 'Codex' and 'claude-mem' in cmd:
         continue
     if tool == 'Claude' and 'claude-mem' in cmd:
+        continue
+    if has_tool_ancestor(int(pid)):
         continue
     artifact_key = (tool, cwd)
     artifact = artifact_cache.get(artifact_key)

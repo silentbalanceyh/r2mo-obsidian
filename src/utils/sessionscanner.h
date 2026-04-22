@@ -75,6 +75,7 @@ private:
     bool isShellProcess(const QString& cmd) const;
     QString getProcessCommand(qint64 pid) const;
     QString getProcessWorkingDir(qint64 pid) const;
+    qint64 getParentPid(qint64 pid) const;
     QDateTime getProcessStartedAt(qint64 pid) const;
     bool isProcessRunning(qint64 pid) const;
     quint64 getProcessCpuTicks(qint64 pid) const;

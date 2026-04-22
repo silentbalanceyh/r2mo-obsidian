@@ -574,6 +574,20 @@ QString SessionScanner::getProcessWorkingDir(qint64 pid) const
     return QString();
 }
 
+qint64 SessionScanner::getParentPid(qint64 pid) const
+{
+#ifdef Q_OS_MAC
+    struct proc_bsdinfo bsdInfo;
+    const int ret = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsdInfo, sizeof(bsdInfo));
+    if (ret > 0) {
+        return static_cast<qint64>(bsdInfo.pbi_ppid);
+    }
+#else
+    Q_UNUSED(pid);
+#endif
+    return 0;
+}
+
 QDateTime SessionScanner::getProcessStartedAt(qint64 pid) const
 {
     QProcess proc;
@@ -719,6 +733,7 @@ SessionStatus SessionScanner::inferCodexArtifactStatus(const QString& sessionPat
 
 SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPath) const
 {
+    const double claudeActiveFreshSeconds = 8.0;
     const QByteArray tail = readArtifactTail(sessionPath);
     if (tail.isEmpty()) {
         return SessionStatus::Unknown;
@@ -732,6 +747,9 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
     for (const QJsonObject& object : objects) {
         const QString type = object.value("type").toString();
         const QString subtype = object.value("subtype").toString();
+        const QDateTime eventTime = parseArtifactEventTime(object);
+        const bool eventIsFresh = eventTime.isValid() &&
+            eventTime.secsTo(QDateTime::currentDateTimeUtc()) <= claudeActiveFreshSeconds;
         if (subtype == "stop_hook_summary") {
             return SessionStatus::Ready;
         }
@@ -755,7 +773,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
             const QJsonObject data = object.value("data").toObject();
             const QString hookEvent = data.value("hookEvent").toString();
             if (hookEvent == "PreToolUse" || hookEvent == "PostToolUse") {
-                return SessionStatus::Working;
+                return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
             }
             if (hookEvent == "Stop") {
                 return SessionStatus::Ready;
@@ -767,7 +785,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
             const QJsonObject message = object.value("message").toObject();
             const QString stopReason = message.value("stop_reason").toString();
             if (stopReason == "tool_use") {
-                return SessionStatus::Working;
+                return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
             }
             if (stopReason == "end_turn") {
                 return SessionStatus::Ready;
@@ -790,7 +808,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
         }
 
         if (type == "tool_use") {
-            return SessionStatus::Working;
+            return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
         }
     }
 
@@ -931,7 +949,7 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
     const bool strongCpuBurst = deltaPerSecond >= 300000.0;
     const bool sustainedCpuActivity = deltaPerSecond >= 90000.0;
 
-    if (strongCpuBurst || (isRunning && deltaPerSecond >= 25000.0)) {
+    if (strongCpuBurst) {
         s_highActivitySamples[pid] = qMax(2, s_highActivitySamples.value(pid, 0) + 1);
         s_lastWorkingTime[pid] = QDateTime::currentDateTime();
         return SessionStatus::Working;
@@ -1344,18 +1362,38 @@ QList<SessionInfo> SessionScanner::detectTerminalProcessSessions(
         for (qint64 shellPid : shellPids) {
             QStringList shellDescendants = getAllChildPids(shellPid, 5);
             QMap<QString, SessionInfo> groupedSessions;
-            for (const QString& pidStr : shellDescendants) {
-                qint64 pid = pidStr.toLongLong();
-                QString cmd = getProcessCommand(pid);
-                if (cmd.isEmpty()) continue;
+        for (const QString& pidStr : shellDescendants) {
+            qint64 pid = pidStr.toLongLong();
+            QString cmd = getProcessCommand(pid);
+            if (cmd.isEmpty()) continue;
 
-                QString toolName = identifyToolName(cmd);
-                QString cwd = getProcessWorkingDir(pid);
-                if (cwd.isEmpty()) cwd = getProcessWorkingDir(shellPid);
-                if (toolName.isEmpty()) continue;
+            QString toolName = identifyToolName(cmd);
+            QString cwd = getProcessWorkingDir(pid);
+            if (cwd.isEmpty()) cwd = getProcessWorkingDir(shellPid);
+            if (toolName.isEmpty()) continue;
 
-                quint64 ticks = getProcessCpuTicks(pid);
-                const bool isRunning = isProcessRunning(pid);
+            const bool hasToolAncestor = [&]() {
+                qint64 parentPid = getParentPid(pid);
+                QSet<qint64> ancestorVisited;
+                while (parentPid > 1 && !ancestorVisited.contains(parentPid)) {
+                    ancestorVisited.insert(parentPid);
+                    if (parentPid <= 1 || parentPid == shellPid) {
+                        break;
+                    }
+                    const QString parentCmd = getProcessCommand(parentPid);
+                    if (!identifyToolName(parentCmd).isEmpty()) {
+                        return true;
+                    }
+                    parentPid = getParentPid(parentPid);
+                }
+                return false;
+            }();
+            if (hasToolAncestor) {
+                continue;
+            }
+
+            quint64 ticks = getProcessCpuTicks(pid);
+            const bool isRunning = isProcessRunning(pid);
 
                 SessionInfo si;
                 si.terminalName = terminalLabel;
@@ -1467,6 +1505,23 @@ QList<SessionInfo> SessionScanner::detectAiProcessSessions() const
         const ProcessRow& row = it.value();
         const QString toolName = identifyToolName(row.args);
         if (toolName.isEmpty()) {
+            continue;
+        }
+
+        const bool hasToolAncestor = [&]() {
+            qint64 ancestorPid = row.ppid;
+            QSet<qint64> ancestorVisited;
+            while (ancestorPid > 1 && !ancestorVisited.contains(ancestorPid)) {
+                ancestorVisited.insert(ancestorPid);
+                const QString parentCmd = getProcessCommand(ancestorPid);
+                if (!identifyToolName(parentCmd).isEmpty()) {
+                    return true;
+                }
+                ancestorPid = getParentPid(ancestorPid);
+            }
+            return false;
+        }();
+        if (hasToolAncestor) {
             continue;
         }
 

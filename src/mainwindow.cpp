@@ -4790,7 +4790,11 @@ QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths()
             continue;
         }
 
-        const QString normalizedVaultPath = QDir::cleanPath(vault.path);
+        QFileInfo vaultInfo(vault.path);
+        QString normalizedVaultPath = QDir::cleanPath(vault.path);
+        if (vaultInfo.fileName() == QStringLiteral(".r2mo")) {
+            normalizedVaultPath = QDir::cleanPath(vaultInfo.path());
+        }
         if (!seenPaths.contains(normalizedVaultPath)) {
             result.append(qMakePair(vault.name, normalizedVaultPath));
             seenPaths.insert(normalizedVaultPath);

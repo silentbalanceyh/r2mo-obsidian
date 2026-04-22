@@ -17,6 +17,17 @@ require_pattern() {
     fi
 }
 
+forbid_pattern() {
+    local pattern="$1"
+    local file="$2"
+    local message="$3"
+
+    if grep -Eq "$pattern" "$file"; then
+        echo "FAIL: $message" >&2
+        exit 1
+    fi
+}
+
 require_pattern 'qint64[[:space:]]+runtimeSeconds;' "$header" \
     "SessionInfo must store cumulative runtime seconds for monitor status display."
 require_pattern 'QString[[:space:]]+formatSessionRuntime[[:space:]]*\([[:space:]]*qint64[[:space:]]+runtimeSeconds[[:space:]]*\)[[:space:]]+const' "$repo_root/src/mainwindow.h" \
@@ -51,5 +62,19 @@ require_pattern 'const[[:space:]]+double[[:space:]]+workingKeepAliveSeconds[[:sp
     "Status detection must use an explicit keep-alive window to reduce drift."
 require_pattern 'secsSinceWork[[:space:]]*<[[:space:]]*workingKeepAliveSeconds' "$scanner_source" \
     "Working status should remain stable during the keep-alive window instead of dropping immediately."
+require_pattern 'const[[:space:]]+bool[[:space:]]+hasToolAncestor[[:space:]]*=' "$scanner_source" \
+    "Live session detection must identify descendant helper processes that are not session roots."
+require_pattern 'if[[:space:]]*\([[:space:]]*hasToolAncestor[[:space:]]*\)[[:space:]]*\{' "$scanner_source" \
+    "Live session detection must skip descendant helper processes once a root tool process exists in the same terminal chain."
+require_pattern 'const[[:space:]]+double[[:space:]]+claudeActiveFreshSeconds[[:space:]]*=' "$scanner_source" \
+    "Claude artifact status detection must use an explicit freshness window."
+require_pattern 'eventTime\.secsTo\(QDateTime::currentDateTimeUtc\(\)\)[[:space:]]*<=[[:space:]]*claudeActiveFreshSeconds' "$scanner_source" \
+    "Claude status detection must verify event freshness before reporting Working."
+require_pattern 'type[[:space:]]*==[[:space:]]*"tool_use"' "$scanner_source" \
+    "Claude status detection must handle tool_use events explicitly."
+require_pattern 'return[[:space:]]+eventIsFresh[[:space:]]*\?[[:space:]]*SessionStatus::Working[[:space:]]*:[[:space:]]*SessionStatus::Ready' "$scanner_source" \
+    "Claude status detection must degrade stale activity events back to Ready instead of leaving phantom Working states."
+forbid_pattern 'isRunning[[:space:]]*&&[[:space:]]*deltaPerSecond[[:space:]]*>=[[:space:]]*25000' "$scanner_source" \
+    "CPU fallback must not flip to Working from a single low-threshold running sample during refresh."
 
 echo "PASS: task-002 monitor status requirements are wired."
