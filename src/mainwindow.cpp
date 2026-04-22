@@ -4833,8 +4833,7 @@ QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths() const
     QList<Vault> vaults = m_vaultModel->vaults();
     
     for (const Vault& vault : vaults) {
-        QDir vaultDir(vault.path);
-        if (!vaultDir.exists()) {
+        if (!vault.isRemote() && !QDir(vault.path).exists()) {
             continue;
         }
 
@@ -4842,21 +4841,6 @@ QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths() const
         if (!seenPaths.contains(normalizedVaultPath)) {
             result.append(qMakePair(vault.name, normalizedVaultPath));
             seenPaths.insert(normalizedVaultPath);
-        }
-
-        if (!m_vaultValidator->hasR2moConfig(vault.path)) {
-            continue;
-        }
-
-        R2moScanner scanner;
-        QList<R2moSubProject> projects = scanner.scanVault(vault.path);
-        for (const R2moSubProject& proj : projects) {
-            const QString normalizedProjectPath = QDir::cleanPath(proj.path);
-            if (seenPaths.contains(normalizedProjectPath)) {
-                continue;
-            }
-            result.append(qMakePair(proj.name, normalizedProjectPath));
-            seenPaths.insert(normalizedProjectPath);
         }
     }
     
