@@ -136,6 +136,7 @@ private:
     QList<Vault> localVaults() const;
     QList<Vault> remoteVaults() const;
     void addRemoteRepository();
+    QString selectRemoteDirectory(const Vault& vault, const QString& startPath) const;
     QList<RemoteDirectoryEntry> fetchRemoteDirectories(const Vault& vault, const QString& basePath, QString* errorMessage = nullptr) const;
     void refreshRemoteConnectivityStatuses(bool force = false);
     void checkRemoteVaultConnectivityAsync(const QString& vaultPath);
@@ -214,6 +215,7 @@ private:
     QPushButton *m_btnZh;
     QPushButton *m_btnEn;
     QPushButton *m_addBtn;
+    QPushButton *m_addRemoteBtn;
     QPushButton *m_removeBtn;
     QPushButton *m_swimlaneBtn;
     QPushButton *m_monitorBtn;

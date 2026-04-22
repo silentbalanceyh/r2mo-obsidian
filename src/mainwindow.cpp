@@ -296,7 +296,7 @@ private:
 
         QStyleOptionButton button;
         button.rect = buttonRect(option);
-        button.text = QObject::tr("Goto");
+        button.text = QCoreApplication::translate("MainWindow", "Goto");
         button.state = QStyle::State_Enabled;
         if (option.state & QStyle::State_MouseOver) {
             button.state |= QStyle::State_MouseOver;
@@ -341,6 +341,7 @@ MainWindow::MainWindow(QWidget *parent)
      , m_btnZh(nullptr)
      , m_btnEn(nullptr)
      , m_addBtn(nullptr)
+     , m_addRemoteBtn(nullptr)
      , m_removeBtn(nullptr)
      , m_swimlaneBtn(nullptr)
       , m_monitorBtn(nullptr)
@@ -521,8 +522,15 @@ void MainWindow::setupToolBar()
     m_addBtn->setText("+");
     m_addBtn->setObjectName("addBtnLeft");
     m_addBtn->setCursor(Qt::PointingHandCursor);
-    m_addBtn->setToolTip(tr("Add Vault"));
+    m_addBtn->setToolTip(tr("Add Local Repository"));
     arLayout->addWidget(m_addBtn);
+
+    m_addRemoteBtn = new QPushButton();
+    m_addRemoteBtn->setText(QStringLiteral("⇄"));
+    m_addRemoteBtn->setObjectName("addRemoteBtnMiddle");
+    m_addRemoteBtn->setCursor(Qt::PointingHandCursor);
+    m_addRemoteBtn->setToolTip(tr("Add Remote Repository"));
+    arLayout->addWidget(m_addRemoteBtn);
     
     m_removeBtn = new QPushButton();
     m_removeBtn->setText("−");
@@ -628,6 +636,7 @@ void MainWindow::setupToolBar()
     
     // Connect Add/Remove buttons
     connect(m_addBtn, &QPushButton::clicked, this, &MainWindow::onAddVault);
+    connect(m_addRemoteBtn, &QPushButton::clicked, this, &MainWindow::addRemoteRepository);
     connect(m_removeBtn, &QPushButton::clicked, this, &MainWindow::onRemoveVault);
     
     // Connect Swimlane button
@@ -1038,7 +1047,7 @@ void MainWindow::setupCentralWidget()
     overviewContentLayout->addStretch(1);
     overviewLayout->addWidget(m_overviewContent, 1);
     setOverviewEmptyState(true);
-    m_tabWidget->addTab(m_overviewTab, tr("概览"));
+    m_tabWidget->addTab(m_overviewTab, tr("Overview"));
     m_tabWidget->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
     
     // Tab 2: Project Tasks (项目任务)
@@ -1058,7 +1067,7 @@ void MainWindow::setupCentralWidget()
     m_taskTree->setAnimated(true);          // Animate expand/collapse
     
     tasksLayout->addWidget(m_taskTree, 1);
-    m_tabWidget->addTab(m_tasksTab, tr("项目任务"));
+    m_tabWidget->addTab(m_tasksTab, tr("Project Tasks"));
     
     // Tab 3: Structure Graph (结构图) - fill entire page
     m_graphTab = new QWidget;
@@ -1081,7 +1090,7 @@ void MainWindow::setupCentralWidget()
     m_graphView->installEventFilter(this);  // Install event filter for zoom/pan
     
     graphLayout->addWidget(m_graphView, 1);
-    m_tabWidget->addTab(m_graphTab, tr("结构图"));
+    m_tabWidget->addTab(m_graphTab, tr("Structure Graph"));
     
     // Tab 4: AI Tools (AI工具)
     m_aiToolsTab = new QWidget;
@@ -1107,7 +1116,7 @@ void MainWindow::setupCentralWidget()
     m_aiToolsTree->setVisible(false);
     aiToolsLayout->addWidget(m_aiToolsTree, 1);
     
-    m_tabWidget->addTab(m_aiToolsTab, tr("AI工具"));
+    m_tabWidget->addTab(m_aiToolsTab, tr("AI Tools"));
 
     rightLayout->addWidget(m_tabWidget, 1);
 
@@ -1130,7 +1139,7 @@ void MainWindow::setupCentralWidget()
         "QTabWidget#mainTabs QTabBar::close-button { width: 14px; height: 14px; subcontrol-position: right; }"
     );
     m_homeTabContent = homeTabContent;
-    m_mainTabWidget->addTab(m_homeTabContent, tr("HOME"));
+    m_mainTabWidget->addTab(m_homeTabContent, tr("Home"));
     m_mainTabWidget->setTabIcon(0, createHomeIcon(
         (ThemeManager::instance()->currentTheme() == ThemeManager::Light)
             ? QColor("#333333") : QColor("#f5f5f7")));
@@ -1409,30 +1418,9 @@ void MainWindow::invalidateMonitorView(bool refreshIfOpen)
 
 void MainWindow::onAddVault()
 {
-    const QStringList addOptions = {
-        tr("Add Local Repository"),
-        tr("Add Remote Repository")
-    };
-    bool optionAccepted = false;
-    const QString addChoice = QInputDialog::getItem(
-        this,
-        tr("Add Repository"),
-        tr("Choose repository type:"),
-        addOptions,
-        0,
-        false,
-        &optionAccepted);
-    if (!optionAccepted) {
-        return;
-    }
-    if (addChoice == tr("Add Remote Repository")) {
-        addRemoteRepository();
-        return;
-    }
-
     // Create selection dialog with tree view
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("Add Project Directory"));
+    dialog.setWindowTitle(tr("Add Local Repository"));
     dialog.setMinimumSize(1200, 600);
     dialog.resize(1400, 700);
     dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
@@ -1576,16 +1564,16 @@ void MainWindow::onAddVault()
             item->setData(0, expandableRole, true);
 
             if (alreadyAdded) {
-                item->setText(1, "[Added]");
+                item->setText(1, tr("Added"));
                 item->setForeground(1, QColor("#86868b"));
             } else if (hasObsidian && openVaults.contains(fullPath)) {
-                item->setText(1, "● Open");
+                item->setText(1, tr("Open"));
                 item->setForeground(1, QColor("#34c759"));
             } else if (hasObsidian) {
-                item->setText(1, "Vault");
+                item->setText(1, tr("Vault"));
                 item->setForeground(1, QColor("#007aff"));
             } else {
-                item->setText(1, "Directory");
+                item->setText(1, tr("Directory"));
                 item->setForeground(1, QColor("#86868b"));
             }
 
@@ -1607,7 +1595,7 @@ void MainWindow::onAddVault()
     // Add home directory as root
     QString homePath = QDir::homePath();
     QTreeWidgetItem* homeItem = new QTreeWidgetItem(treeWidget);
-    homeItem->setText(0, "🏠 ~ (Home)");
+    homeItem->setText(0, QStringLiteral("🏠 ~ (%1)").arg(tr("Home")));
     homeItem->setText(1, "");
     homeItem->setText(2, homePath);
     homeItem->setData(0, Qt::UserRole, homePath);
@@ -1651,10 +1639,10 @@ void MainWindow::onAddVault()
         
         // Column 1: Status with color
         if (info.isOpen) {
-            vaultItem->setText(1, "● Open");
+            vaultItem->setText(1, tr("Open"));
             vaultItem->setForeground(1, QColor("#34c759"));
         } else {
-            vaultItem->setText(1, "Vault");
+            vaultItem->setText(1, tr("Vault"));
             vaultItem->setForeground(1, QColor("#007aff"));
         }
         
@@ -2009,6 +1997,139 @@ QList<MainWindow::RemoteDirectoryEntry> MainWindow::fetchRemoteDirectories(const
     return entries;
 }
 
+QString MainWindow::selectRemoteDirectory(const Vault& vault, const QString& startPath) const
+{
+    QDialog dialog(const_cast<MainWindow*>(this));
+    dialog.setWindowTitle(tr("Select Remote Directory"));
+    dialog.setMinimumSize(1200, 640);
+    dialog.resize(1400, 760);
+    dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(12);
+
+    QLabel *headerLabel = new QLabel(tr("Select a remote project directory:"), &dialog);
+    headerLabel->setStyleSheet("font-size: 15px; font-weight: 600;");
+    layout->addWidget(headerLabel);
+
+    QTreeWidget *treeWidget = new QTreeWidget(&dialog);
+    treeWidget->setHeaderLabels(QStringList() << tr("Name") << tr("Path"));
+    treeWidget->setRootIsDecorated(true);
+    treeWidget->setAlternatingRowColors(true);
+    treeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+    treeWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
+    treeWidget->setExpandsOnDoubleClick(false);
+    treeWidget->setIndentation(18);
+    treeWidget->header()->setStretchLastSection(true);
+    treeWidget->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    treeWidget->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+
+    const int pathRole = Qt::UserRole;
+    const int expandableRole = Qt::UserRole + 1;
+    const int loadedRole = Qt::UserRole + 2;
+
+    auto createDirectoryNode = [&](QTreeWidgetItem *parent, const RemoteDirectoryEntry& entry) {
+        QTreeWidgetItem *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(treeWidget);
+        item->setText(0, QStringLiteral("📂 %1").arg(entry.displayName));
+        item->setText(1, entry.path);
+        item->setData(0, pathRole, entry.path);
+        item->setData(0, expandableRole, true);
+        item->setData(0, loadedRole, false);
+        item->setToolTip(0, entry.path);
+        item->setToolTip(1, entry.path);
+
+        QTreeWidgetItem *placeholder = new QTreeWidgetItem(item);
+        placeholder->setText(0, tr("Loading..."));
+        placeholder->setData(0, expandableRole, false);
+        placeholder->setData(0, loadedRole, true);
+        return item;
+    };
+
+    auto loadChildren = [&](QTreeWidgetItem *item) {
+        if (!item || item->data(0, loadedRole).toBool()) {
+            return;
+        }
+        item->takeChildren();
+        QString errorMessage;
+        const QList<RemoteDirectoryEntry> directories = fetchRemoteDirectories(
+            vault,
+            item->data(0, pathRole).toString(),
+            &errorMessage);
+        for (const RemoteDirectoryEntry& entry : directories) {
+            createDirectoryNode(item, entry);
+        }
+        item->setData(0, loadedRole, true);
+        if (directories.isEmpty() && !errorMessage.isEmpty()) {
+            QTreeWidgetItem *placeholder = new QTreeWidgetItem(item);
+            placeholder->setText(0, errorMessage);
+            placeholder->setForeground(0, QColor("#ff9500"));
+        }
+    };
+
+    QString initialError;
+    const QString rootPath = startPath.trimmed().isEmpty() ? vault.remotePath : startPath.trimmed();
+    const QList<RemoteDirectoryEntry> rootDirectories = fetchRemoteDirectories(vault, rootPath, &initialError);
+    if (rootDirectories.isEmpty()) {
+        QMessageBox::warning(const_cast<MainWindow*>(this),
+                             tr("Remote Directory"),
+                             initialError.isEmpty() ? tr("No remote directories found.") : initialError);
+        return QString();
+    }
+
+    QTreeWidgetItem *rootItem = new QTreeWidgetItem(treeWidget);
+    rootItem->setText(0, QStringLiteral("🖥 %1").arg(rootPath));
+    rootItem->setText(1, rootPath);
+    rootItem->setData(0, pathRole, rootPath);
+    rootItem->setData(0, expandableRole, true);
+    rootItem->setData(0, loadedRole, true);
+    rootItem->setToolTip(0, rootPath);
+    rootItem->setToolTip(1, rootPath);
+    for (const RemoteDirectoryEntry& entry : rootDirectories) {
+        createDirectoryNode(rootItem, entry);
+    }
+    treeWidget->expandItem(rootItem);
+    layout->addWidget(treeWidget);
+
+    QLabel *infoLabel = new QLabel(tr("📂 = Remote directory (double-click to select or expand for children)"), &dialog);
+    infoLabel->setStyleSheet("color: #86868b; font-size: 14px;");
+    layout->addWidget(infoLabel);
+
+    QHBoxLayout *buttonLayout = new QHBoxLayout();
+    buttonLayout->addStretch();
+    QPushButton *selectBtn = new QPushButton(tr("Select"), &dialog);
+    selectBtn->setEnabled(false);
+    QPushButton *cancelBtn = new QPushButton(tr("Cancel"), &dialog);
+    buttonLayout->addWidget(selectBtn);
+    buttonLayout->addWidget(cancelBtn);
+    layout->addLayout(buttonLayout);
+
+    connect(treeWidget, &QTreeWidget::itemExpanded, &dialog, loadChildren);
+    connect(treeWidget, &QTreeWidget::itemSelectionChanged, &dialog, [&]() {
+        QTreeWidgetItem *current = treeWidget->currentItem();
+        selectBtn->setEnabled(current && !current->text(1).isEmpty());
+    });
+    connect(cancelBtn, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(selectBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+    connect(treeWidget, &QTreeWidget::itemDoubleClicked, &dialog, [&](QTreeWidgetItem *item, int) {
+        if (!item) {
+            return;
+        }
+        if (item->data(0, expandableRole).toBool() && !item->data(0, loadedRole).toBool()) {
+            loadChildren(item);
+        }
+        if (!item->text(1).isEmpty()) {
+            dialog.accept();
+        }
+    });
+
+    dialog.setStyleSheet(ThemeManager::instance()->currentStyle());
+    if (dialog.exec() != QDialog::Accepted || !treeWidget->currentItem()) {
+        return QString();
+    }
+    return treeWidget->currentItem()->data(0, pathRole).toString();
+}
+
 void MainWindow::applyRemoteConnectivityResult(const QString& vaultPath, bool connected, const QString& errorText)
 {
     const int idx = m_vaultModel->indexOf(vaultPath);
@@ -2089,11 +2210,18 @@ void MainWindow::addRemoteRepository()
 {
     QDialog dialog(this);
     dialog.setWindowTitle(tr("Add Remote Repository"));
-    dialog.setMinimumWidth(560);
+    dialog.setMinimumSize(900, 0);
+    dialog.resize(980, 460);
     dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
     QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(22, 18, 22, 18);
+    layout->setSpacing(14);
     QFormLayout *form = new QFormLayout();
+    form->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
+    form->setHorizontalSpacing(18);
+    form->setVerticalSpacing(14);
+    form->setContentsMargins(0, 4, 0, 0);
 
     QLineEdit *nameEdit = new QLineEdit(&dialog);
     QLineEdit *hostEdit = new QLineEdit(&dialog);
@@ -2107,6 +2235,15 @@ void MainWindow::addRemoteRepository()
     QLineEdit *remoteDirEdit = new QLineEdit(&dialog);
     remoteDirEdit->setPlaceholderText(tr("/path/to/remote/project"));
     QPushButton *browseRemoteDirBtn = new QPushButton(tr("Browse Remote Directory"), &dialog);
+
+    const QList<QLineEdit*> edits = {nameEdit, hostEdit, usernameEdit, passwordEdit, remoteDirEdit};
+    for (QLineEdit *edit : edits) {
+        edit->setMinimumWidth(520);
+        edit->setMaximumWidth(760);
+        edit->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    }
+    browseRemoteDirBtn->setMaximumWidth(220);
+    browseRemoteDirBtn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
 
     form->addRow(tr("Repository Name"), nameEdit);
     form->addRow(tr("Remote Address"), hostEdit);
@@ -2142,38 +2279,22 @@ void MainWindow::addRemoteRepository()
         tempVault.useKeyAuth = passwordlessBox->isChecked();
         tempVault.remotePath = remoteDirEdit->text().trimmed().isEmpty() ? QStringLiteral(".") : remoteDirEdit->text().trimmed();
 
-        QString errorMessage;
-        const QList<RemoteDirectoryEntry> directories = fetchRemoteDirectories(tempVault, tempVault.remotePath, &errorMessage);
-        if (directories.isEmpty()) {
-            QMessageBox::warning(&dialog, tr("Remote Directory"), errorMessage.isEmpty() ? tr("No remote directories found.") : errorMessage);
+        if (tempVault.host.isEmpty() || tempVault.username.isEmpty()) {
+            QMessageBox::warning(&dialog,
+                                 tr("Remote Directory"),
+                                 tr("Remote Address and Username are required before browsing remote directories."));
             return;
         }
 
-        QStringList options;
-        for (const RemoteDirectoryEntry& entry : directories) {
-            options.append(QStringLiteral("%1 (%2)").arg(entry.displayName, entry.path));
-        }
-
-        bool accepted = false;
-        const QString selected = QInputDialog::getItem(
-            &dialog,
-            tr("Remote Directory"),
-            tr("Select Remote Directory"),
-            options,
-            0,
-            false,
-            &accepted);
-        if (!accepted || selected.isEmpty()) {
-            return;
-        }
-
-        const int optionIndex = options.indexOf(selected);
-        if (optionIndex >= 0 && optionIndex < directories.size()) {
-            remoteDirEdit->setText(directories.at(optionIndex).path);
+        const QString selectedPath = selectRemoteDirectory(tempVault, tempVault.remotePath);
+        if (!selectedPath.isEmpty()) {
+            remoteDirEdit->setText(selectedPath);
         }
     });
 
     QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttonBox->button(QDialogButtonBox::Ok)->setText(tr("OK"));
+    buttonBox->button(QDialogButtonBox::Cancel)->setText(tr("Cancel"));
     layout->addWidget(buttonBox);
     connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -2401,7 +2522,7 @@ void MainWindow::updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& 
         tokenLayout->setContentsMargins(8, 0, 8, 0);
         tokenLayout->setSpacing(6);
         QToolButton *copyBtn = new QToolButton(tokenWidget);
-        copyBtn->setText(tr("复制"));
+        copyBtn->setText(tr("Copy"));
         copyBtn->setAutoRaise(true);
         copyBtn->setCursor(Qt::PointingHandCursor);
         copyBtn->setToolTip(QString());
@@ -3532,14 +3653,52 @@ void MainWindow::retranslateUi()
     // Retranslate labels
     m_vaultLabel->setText(tr("Vaults"));
     m_previewLabel->setText(tr("Preview"));
+    m_vaultStatsHeader->setText(tr("Vault Statistics"));
+    m_r2moStatsHeader->setText(tr("R2MO Statistics"));
+    m_taskTree->setHeaderLabel(tr("Tasks"));
+    m_aiToolsTree->setHeaderLabel(tr("AI Tools"));
     
-    // Retranslate buttons
-    m_addBtn->setText(tr("Add"));
-    m_removeBtn->setText(tr("Remove"));
+    // Retranslate buttons and tooltips
+    m_addBtn->setText(QStringLiteral("+"));
+    m_addBtn->setToolTip(tr("Add Local Repository"));
+    if (m_addRemoteBtn) {
+        m_addRemoteBtn->setText(QStringLiteral("⇄"));
+        m_addRemoteBtn->setToolTip(tr("Add Remote Repository"));
+    }
+    m_removeBtn->setText(QStringLiteral("−"));
+    m_removeBtn->setToolTip(tr("Remove Vault"));
+    m_swimlaneBtn->setToolTip(tr("Swimlane View"));
+    m_monitorBtn->setToolTip(tr("Monitor Board"));
     m_previewOpenBtn->setText(tr("Open"));
     
     // Retranslate placeholder
     m_previewTitle->setText(tr("Select a vault..."));
+
+    if (m_tabWidget) {
+        const int overviewIdx = m_tabWidget->indexOf(m_overviewTab);
+        const int tasksIdx = m_tabWidget->indexOf(m_tasksTab);
+        const int graphIdx = m_tabWidget->indexOf(m_graphTab);
+        const int aiToolsIdx = m_tabWidget->indexOf(m_aiToolsTab);
+        if (overviewIdx >= 0) m_tabWidget->setTabText(overviewIdx, tr("Overview"));
+        if (tasksIdx >= 0) m_tabWidget->setTabText(tasksIdx, tr("Project Tasks"));
+        if (graphIdx >= 0) m_tabWidget->setTabText(graphIdx, tr("Structure Graph"));
+        if (aiToolsIdx >= 0) m_tabWidget->setTabText(aiToolsIdx, tr("AI Tools"));
+    }
+
+    if (m_mainTabWidget) {
+        const int homeIdx = m_mainTabWidget->indexOf(m_homeTabContent);
+        if (homeIdx >= 0) {
+            m_mainTabWidget->setTabText(homeIdx, tr("Home"));
+        }
+        const int swimlaneIdx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
+        if (swimlaneIdx >= 0) {
+            m_mainTabWidget->setTabText(swimlaneIdx, tr("Swimlane"));
+        }
+        const int monitorIdx = m_mainTabWidget->indexOf(m_monitorTabContent);
+        if (monitorIdx >= 0) {
+            m_mainTabWidget->setTabText(monitorIdx, tr("Monitor Board"));
+        }
+    }
     
     // Retranslate menu bar - just update action texts, don't rebuild
     QList<QAction*> actions = menuBar()->actions();
@@ -3577,6 +3736,9 @@ void MainWindow::retranslateUi()
         }
     }
     
+    updateVaultList();
+    updatePreviewPane(m_previewTitle->text(), m_currentPreviewPath);
+
     // Re-enable updates
     setUpdatesEnabled(true);
 }

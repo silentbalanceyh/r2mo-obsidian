@@ -460,6 +460,38 @@ QLineEdit:focus {
     border-color: #007aff;
 }
 
+QComboBox {
+    background-color: white;
+    color: #1d1d1f;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 3px;
+    padding: 8px 12px;
+    min-height: 20px;
+}
+
+QComboBox:hover {
+    border-color: rgba(0, 0, 0, 0.18);
+}
+
+QComboBox:focus {
+    border-color: #007aff;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 28px;
+    background: transparent;
+}
+
+QComboBox QAbstractItemView {
+    background-color: white;
+    color: #1d1d1f;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    selection-background-color: #007aff;
+    selection-color: white;
+    outline: none;
+}
+
 /* ToolBar */
 QToolBar {
     background-color: rgba(255, 255, 255, 0.9);
@@ -608,6 +640,25 @@ QPushButton#addBtnLeft {
 
 QPushButton#addBtnLeft:hover {
     background-color: #0056cc;
+}
+
+QPushButton#addRemoteBtnMiddle {
+    background-color: #34c759;
+    color: white;
+    border: 1px solid #34c759;
+    border-right: none;
+    border-radius: 0px;
+    font-size: 15px;
+    font-weight: bold;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#addRemoteBtnMiddle:hover {
+    background-color: #28a745;
 }
 
 QPushButton#removeBtnRight {
@@ -999,6 +1050,38 @@ QLineEdit:focus {
     border-color: #0a84ff;
 }
 
+QComboBox {
+    background-color: #3a3a3c;
+    color: #f5f5f7;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    padding: 8px 12px;
+    min-height: 20px;
+}
+
+QComboBox:hover {
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+QComboBox:focus {
+    border-color: #0a84ff;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 28px;
+    background: transparent;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #2c2c2e;
+    color: #f5f5f7;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    selection-background-color: #0a84ff;
+    selection-color: white;
+    outline: none;
+}
+
 /* ToolBar */
 QToolBar {
     background-color: rgba(44, 44, 46, 0.9);
@@ -1150,6 +1233,25 @@ QPushButton#addBtnLeft {
 
 QPushButton#addBtnLeft:hover {
     background-color: #0070e0;
+}
+
+QPushButton#addRemoteBtnMiddle {
+    background-color: #30d158;
+    color: white;
+    border: 1px solid #30d158;
+    border-right: none;
+    border-radius: 0px;
+    font-size: 15px;
+    font-weight: bold;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0px;
+}
+
+QPushButton#addRemoteBtnMiddle:hover {
+    background-color: #28b84d;
 }
 
 QPushButton#removeBtnRight {
