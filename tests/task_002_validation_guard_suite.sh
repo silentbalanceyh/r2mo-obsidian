@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 bash "$repo_root/tests/task_002_codex_status_guard_test.sh"
 bash "$repo_root/tests/task_002_codex_midturn_guard_test.sh"
+bash "$repo_root/tests/task_002_codex_assignment_priority_guard_test.sh"
 bash "$repo_root/tests/task_002_local_opencode_status_guard_test.sh"
 bash "$repo_root/tests/task_002_local_monitor_path_guard_test.sh"
 bash "$repo_root/tests/task_002_monitor_status_test.sh"

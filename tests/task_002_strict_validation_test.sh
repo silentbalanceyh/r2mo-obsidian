@@ -14,7 +14,7 @@ pass_count=0
 run_case() {
     local name="$1"
     shift
-    printf '[%02d/31] %s\n' "$((pass_count + 1))" "$name"
+    printf '[%02d/32] %s\n' "$((pass_count + 1))" "$name"
     "$@"
     pass_count=$((pass_count + 1))
 }
@@ -34,6 +34,9 @@ run_case "Task-002 Codex status guards" \
 
 run_case "Task-002 Codex mid-turn guards" \
     bash "$repo_root/tests/task_002_codex_midturn_guard_test.sh"
+
+run_case "Task-002 Codex assignment priority guards" \
+    bash "$repo_root/tests/task_002_codex_assignment_priority_guard_test.sh"
 
 run_case "Task-002 local OpenCode status guards" \
     bash "$repo_root/tests/task_002_local_opencode_status_guard_test.sh"
@@ -151,4 +154,4 @@ PY
 run_case "Remote SSH probe returns live monitor tools" \
     bash -lc "ssh -o BatchMode=yes -o StrictHostKeyChecking=no lang@mxt.webos.cn \"python3 - /media/psf/r2mo-apps/app-webos\" < /tmp/remote_opencode_probe.py | grep -Eq 'Codex|Claude|OpenCode'"
 
-echo "PASS: 31/31 strict task-002 validation cases succeeded."
+echo "PASS: 32/32 strict task-002 validation cases succeeded."

@@ -1724,40 +1724,8 @@ void SessionScanner::assignCodexSessionArtifacts(QList<SessionInfo>& sessions) c
             return left.processPid > right.processPid;
         });
 
-        const QList<CodexLogSessionRecord> projectLogs =
-            collectCodexLogCandidatesForProject(logRecords, it.key(), usedSessionIds);
-        const int logAssignCount = qMin(sortedIndexes.size(), projectLogs.size());
-        for (int i = 0; i < logAssignCount; ++i) {
-            SessionInfo& session = sessions[sortedIndexes.at(i)];
-            const CodexLogSessionRecord& record = projectLogs.at(i);
-            session.sessionId = record.sessionId;
-            if (session.projectPath.isEmpty()) {
-                session.projectPath = record.projectPath;
-            }
-            usedSessionIds.insert(record.sessionId);
-
-            const auto artifactIt = artifactById.constFind(record.sessionId);
-            if (artifactIt != artifactById.cend() &&
-                !usedPaths.contains(artifactIt->sessionPath)) {
-                applyArtifact(session, artifactIt.value());
-                usedPaths.insert(artifactIt->sessionPath);
-            }
-        }
-    }
-
-    byProject.clear();
-    for (int index : codexIndexes) {
-        SessionInfo& session = sessions[index];
-        if (hasKnownSessionId(session.sessionId)) {
-            continue;
-        }
-        byProject[QDir::cleanPath(session.projectPath)].append(index);
-    }
-
-    for (auto it = byProject.begin(); it != byProject.end(); ++it) {
         const QString projectPath = it.key();
         QList<CodexSessionArtifact> matchedArtifacts;
-
         for (const CodexSessionArtifact& artifact : artifacts) {
             if (usedPaths.contains(artifact.sessionPath)) {
                 continue;
@@ -1772,12 +1740,7 @@ void SessionScanner::assignCodexSessionArtifacts(QList<SessionInfo>& sessions) c
             matchedArtifacts.append(artifact);
         }
 
-        const QList<int>& indexes = it.value();
-        if (indexes.isEmpty() || matchedArtifacts.isEmpty()) {
-            continue;
-        }
-
-        QList<int> remainingIndexes = indexes;
+        QList<int> remainingIndexes = sortedIndexes;
         QList<CodexSessionArtifact> remainingArtifacts = matchedArtifacts;
         while (!remainingIndexes.isEmpty() && !remainingArtifacts.isEmpty()) {
             int bestSessionIndex = -1;
@@ -1808,6 +1771,7 @@ void SessionScanner::assignCodexSessionArtifacts(QList<SessionInfo>& sessions) c
             if (bestSessionIndex < 0 || bestArtifactIndex < 0) {
                 SessionInfo& session = sessions[remainingIndexes.first()];
                 applyArtifact(session, remainingArtifacts.first());
+                usedSessionIds.insert(remainingArtifacts.first().sessionId);
                 usedPaths.insert(remainingArtifacts.first().sessionPath);
                 remainingIndexes.removeFirst();
                 remainingArtifacts.removeFirst();
@@ -1815,9 +1779,36 @@ void SessionScanner::assignCodexSessionArtifacts(QList<SessionInfo>& sessions) c
             }
 
             applyArtifact(sessions[bestSessionIndex], remainingArtifacts.at(bestArtifactIndex));
+            usedSessionIds.insert(remainingArtifacts.at(bestArtifactIndex).sessionId);
             usedPaths.insert(remainingArtifacts.at(bestArtifactIndex).sessionPath);
             remainingIndexes.removeAll(bestSessionIndex);
             remainingArtifacts.removeAt(bestArtifactIndex);
+        }
+
+        const QList<CodexLogSessionRecord> projectLogs =
+            collectCodexLogCandidatesForProject(logRecords, it.key(), usedSessionIds);
+        QList<int> unresolvedIndexes;
+        for (int index : sortedIndexes) {
+            if (!hasKnownSessionId(sessions[index].sessionId)) {
+                unresolvedIndexes.append(index);
+            }
+        }
+        const int logAssignCount = qMin(unresolvedIndexes.size(), projectLogs.size());
+        for (int i = 0; i < logAssignCount; ++i) {
+            SessionInfo& session = sessions[unresolvedIndexes.at(i)];
+            const CodexLogSessionRecord& record = projectLogs.at(i);
+            session.sessionId = record.sessionId;
+            if (session.projectPath.isEmpty()) {
+                session.projectPath = record.projectPath;
+            }
+            usedSessionIds.insert(record.sessionId);
+
+            const auto artifactIt = artifactById.constFind(record.sessionId);
+            if (artifactIt != artifactById.cend() &&
+                !usedPaths.contains(artifactIt->sessionPath)) {
+                applyArtifact(session, artifactIt.value());
+                usedPaths.insert(artifactIt->sessionPath);
+            }
         }
     }
 }
