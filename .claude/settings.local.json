@@ -2,5 +2,5 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "model": "glm-5"
+  "model": "glm-5.1"
 }

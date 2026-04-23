@@ -31,6 +31,9 @@ qrc_*.cpp
 *.pro.user
 *.creator.user
 
+# Local AI agent runtime state
+.omc/
+
 # macOS
 .DS_Store
 *.dSYM/
