@@ -14,7 +14,7 @@ pass_count=0
 run_case() {
     local name="$1"
     shift
-    printf '[%02d/22] %s\n' "$((pass_count + 1))" "$name"
+    printf '[%02d/31] %s\n' "$((pass_count + 1))" "$name"
     "$@"
     pass_count=$((pass_count + 1))
 }
@@ -32,14 +32,26 @@ require_pattern() {
 run_case "Task-002 Codex status guards" \
     bash "$repo_root/tests/task_002_codex_status_guard_test.sh"
 
+run_case "Task-002 Codex mid-turn guards" \
+    bash "$repo_root/tests/task_002_codex_midturn_guard_test.sh"
+
+run_case "Task-002 local OpenCode status guards" \
+    bash "$repo_root/tests/task_002_local_opencode_status_guard_test.sh"
+
 run_case "Task-002 local monitor path guards" \
     bash "$repo_root/tests/task_002_local_monitor_path_guard_test.sh"
 
 run_case "Task-002 monitor status guards" \
     bash "$repo_root/tests/task_002_monitor_status_test.sh"
 
+run_case "Task-002 monitor runtime display guards" \
+    bash "$repo_root/tests/task_002_monitor_runtime_display_guard_test.sh"
+
 run_case "Task-002 OpenCode guards" \
     bash "$repo_root/tests/task_002_opencode_session_guard_test.sh"
+
+run_case "Task-002 remote OpenCode artifact fallback guards" \
+    bash "$repo_root/tests/task_002_remote_opencode_artifact_fallback_test.sh"
 
 run_case "Task-002 remote process-root guards" \
     bash "$repo_root/tests/task_002_remote_process_root_guard_test.sh"
@@ -52,6 +64,21 @@ run_case "Task-002 terminal icon guards" \
 
 run_case "Remote monitor scanner guards" \
     bash "$repo_root/tests/task_001_remote_monitor_session_test.sh"
+
+run_case "OpenCode freshness guards" \
+    bash "$repo_root/tests/task_001_opencode_freshness_guard_test.sh"
+
+run_case "Local Claude subagent guards" \
+    bash "$repo_root/tests/task_001_local_claude_subagent_guard_test.sh"
+
+run_case "Remote dedupe guards" \
+    bash "$repo_root/tests/task_001_remote_dedupe_guard_test.sh"
+
+run_case "Remote Claude assignment guards" \
+    bash "$repo_root/tests/task_001_remote_claude_session_assignment_guard_test.sh"
+
+run_case "Status semantics guards" \
+    bash "$repo_root/tests/task_001_status_semantics_guard_test.sh"
 
 run_case "Special monitor refresh guards" \
     bash "$repo_root/tests/task_002_special_monitor_refresh_test.sh"
@@ -85,6 +112,9 @@ run_case "Remote candidate ranking present" \
 
 run_case "Remote vendor preference present" \
     grep -Eq 'detailText\.contains\("/vendor/"\)' "$remote_scanner_source"
+
+run_case "Remote artifact fallback guard present" \
+    grep -Eq 'if artifact and found_any_row:' "$remote_scanner_source"
 
 run_case "Monitor runtime formatting wired" \
     grep -Eq 'QString[[:space:]]+formatSessionRuntime[[:space:]]*\([[:space:]]*qint64[[:space:]]+runtimeSeconds[[:space:]]*\)[[:space:]]+const' "$window_header"
@@ -121,4 +151,4 @@ PY
 run_case "Remote SSH probe returns live monitor tools" \
     bash -lc "ssh -o BatchMode=yes -o StrictHostKeyChecking=no lang@mxt.webos.cn \"python3 - /media/psf/r2mo-apps/app-webos\" < /tmp/remote_opencode_probe.py | grep -Eq 'Codex|Claude|OpenCode'"
 
-echo "PASS: 22/22 strict task-002 validation cases succeeded."
+echo "PASS: 31/31 strict task-002 validation cases succeeded."

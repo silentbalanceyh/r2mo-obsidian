@@ -236,12 +236,9 @@ private:
 
         const QModelIndex baseIndex = index.sibling(index.row(), 0);
         const SessionStatus status = static_cast<SessionStatus>(baseIndex.data(kMonitorStatusRole).toInt());
-        const qint64 runtimeSeconds = baseIndex.data(kMonitorRuntimeRole).toLongLong();
-        const QString runtimeText = formatRuntime(runtimeSeconds);
-        const QString statusText = (status == SessionStatus::Working
+        const QString statusText = status == SessionStatus::Working
                 ? QCoreApplication::translate("MainWindow", "Working")
-                : QCoreApplication::translate("MainWindow", "Ready")) +
-            QStringLiteral(" ") + runtimeText;
+                : QCoreApplication::translate("MainWindow", "Ready");
 
         const QRect contentRect = option.rect.adjusted(8, 5, -8, -5);
         const int textWidth = qMax(120, option.fontMetrics.horizontalAdvance(statusText) + 16);

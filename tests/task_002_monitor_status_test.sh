@@ -34,12 +34,14 @@ require_pattern 'QString[[:space:]]+formatSessionRuntime[[:space:]]*\([[:space:]
     "MainWindow must expose a formatter for cumulative session runtime."
 require_pattern 'class[[:space:]]+MonitorTreeDelegate' "$window_source" \
     "Monitor rows should render status through a delegate to avoid per-row widget overhead."
-require_pattern 'const[[:space:]]+QString[[:space:]]+statusText[[:space:]]*=' "$window_source" \
-    "Monitor status paint path must build a combined status label with runtime."
+require_pattern 'const[[:space:]]+QString[[:space:]]+statusText[[:space:]]*=[[:space:]]*status[[:space:]]*==[[:space:]]*SessionStatus::Working' "$window_source" \
+    "Monitor status paint path must render a plain Working/Ready label from session status."
 require_pattern 'QCoreApplication::translate\("MainWindow",[[:space:]]*"Working"\)' "$window_source" \
     "Working status text must use the MainWindow translation context."
 require_pattern 'QCoreApplication::translate\("MainWindow",[[:space:]]*"Ready"\)' "$window_source" \
     "Ready status text must use the MainWindow translation context."
+forbid_pattern 'QStringLiteral\(" "\)[[:space:]]*\+[[:space:]]*runtimeText' "$window_source" \
+    "Monitor status paint path must no longer append runtime text to the Ready/Working label."
 require_pattern 'QColor\(\"#34c759\"' "$window_source" \
     "Working status paint path must render in green."
 require_pattern 'QColor\(\"#007aff\"' "$window_source" \

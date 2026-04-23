@@ -700,7 +700,7 @@ SessionStatus SessionScanner::inferCodexArtifactStatus(const QString& sessionPat
             if (payloadType == "exec_command_end" ||
                 payloadType == "function_call_output" ||
                 payloadType == "patch_apply_end") {
-                return SessionStatus::Ready;
+                return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
             }
             continue;
         }
@@ -714,7 +714,7 @@ SessionStatus SessionScanner::inferCodexArtifactStatus(const QString& sessionPat
                 return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
             }
             if (payloadType == "function_call_output") {
-                return SessionStatus::Ready;
+                return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
             }
             if (payloadType == "message") {
                 const QString phase = payload.value("phase").toString();
@@ -844,6 +844,7 @@ SessionStatus SessionScanner::inferOpenCodeGlobalStatus(const QString& sessionId
         return SessionStatus::Unknown;
     }
 
+    const double openCodeActiveFreshSeconds = 8.0;
     const QString globalPath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation)
         + "/Library/Application Support/ai.opencode.desktop/opencode.global.dat";
     const QByteArray tail = readArtifactTail(globalPath, 262144);
@@ -881,6 +882,16 @@ SessionStatus SessionScanner::inferOpenCodeGlobalStatus(const QString& sessionId
         }
 
         const QString type = entry.value("type").toString();
+        const qint64 notificationEpochMs = static_cast<qint64>(entry.value("time").toDouble());
+        const QDateTime notificationTime = notificationEpochMs > 0
+            ? QDateTime::fromMSecsSinceEpoch(notificationEpochMs, Qt::UTC)
+            : QDateTime();
+        const bool notificationIsFresh = notificationTime.isValid() &&
+            notificationTime.msecsTo(QDateTime::currentDateTimeUtc()) <=
+                static_cast<qint64>(openCodeActiveFreshSeconds * 1000.0);
+        if (type == "turn-start" || type == "session.status") {
+            return notificationIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+        }
         if (type == "turn-complete" || type == "error") {
             return SessionStatus::Ready;
         }
@@ -893,6 +904,17 @@ SessionStatus SessionScanner::inferOpenCodeGlobalStatus(const QString& sessionId
 SessionStatus SessionScanner::inferArtifactStatus(const QString& toolName, const QString& sessionId,
                                                   const QString& sessionPath) const
 {
+    if (toolName == "OpenCode") {
+        const SessionStatus globalStatus = inferOpenCodeGlobalStatus(sessionId);
+        if (globalStatus != SessionStatus::Unknown) {
+            return globalStatus;
+        }
+        if (sessionPath.isEmpty()) {
+            return SessionStatus::Unknown;
+        }
+        return inferOpenCodeArtifactStatus(sessionId, sessionPath);
+    }
+
     if (sessionPath.isEmpty()) {
         return SessionStatus::Unknown;
     }
@@ -903,14 +925,6 @@ SessionStatus SessionScanner::inferArtifactStatus(const QString& toolName, const
     if (toolName == "Claude") {
         return inferClaudeArtifactStatus(sessionPath);
     }
-    if (toolName == "OpenCode") {
-        const SessionStatus globalStatus = inferOpenCodeGlobalStatus(sessionId);
-        if (globalStatus != SessionStatus::Unknown) {
-            return globalStatus;
-        }
-        return inferOpenCodeArtifactStatus(sessionId, sessionPath);
-    }
-
     return SessionStatus::Unknown;
 }
 
@@ -925,6 +939,14 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
             s_lastWorkingTime[pid] = QDateTime::currentDateTime();
         }
         return artifactStatus;
+    }
+
+    if (toolName == "OpenCode") {
+        return SessionStatus::Ready;
+    }
+
+    if (!isRunning) {
+        return SessionStatus::Ready;
     }
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -1029,8 +1051,14 @@ QList<SessionScanner::GenericSessionArtifact> SessionScanner::collectClaudeSessi
         return artifacts;
     }
 
-    const QFileInfoList files = dir.entryInfoList(QStringList() << "*.jsonl" << "*.json", QDir::Files, QDir::Time);
-    for (const QFileInfo& fi : files) {
+    QDirIterator it(dir.path(),
+                    QStringList() << "*.jsonl" << "*.json",
+                    QDir::Files,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        const QFileInfo fi = it.fileInfo();
+        const bool isSubagentArtifact = fi.filePath().contains("/subagents/");
         const QString base = fi.completeBaseName();
         if (base.length() >= 32 || base.count("-") >= 4) {
             GenericSessionArtifact artifact;
@@ -1038,6 +1066,7 @@ QList<SessionScanner::GenericSessionArtifact> SessionScanner::collectClaudeSessi
             artifact.sessionPath = fi.filePath();
             artifact.projectPath = normalizePath(projectPath);
             artifact.lastModified = fi.lastModified();
+            Q_UNUSED(isSubagentArtifact);
             artifacts.append(artifact);
         }
     }

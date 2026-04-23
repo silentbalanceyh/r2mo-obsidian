@@ -186,6 +186,41 @@ def latest_opencode_artifact(project):
             continue
     return best
 
+def latest_opencode_notification(session_id):
+    if not session_id or session_id == 'unknown':
+        return None
+    path = os.path.expanduser('~/Library/Application Support/ai.opencode.desktop/opencode.global.dat')
+    try:
+        with open(path, 'r', errors='replace') as f:
+            obj = json.load(f)
+    except Exception:
+        return None
+    notification_text = obj.get('notification')
+    if not notification_text:
+        return None
+    try:
+        notification_obj = json.loads(notification_text)
+    except Exception:
+        return None
+    entries = notification_obj.get('list') or []
+    for entry in reversed(entries):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get('session') != session_id:
+            continue
+        return entry
+    return None
+
+def notification_time_is_fresh(notification):
+    open_code_active_fresh_seconds = 8.0
+    notification_time = notification.get('time')
+    if not notification_time:
+        return False
+    try:
+        return (now * 1000.0) - float(notification_time) <= (open_code_active_fresh_seconds * 1000.0)
+    except Exception:
+        return False
+
 def claude_project_dir_candidates(project):
     normalized = normalize_path(project).strip('/')
     if not normalized:
@@ -204,7 +239,7 @@ def claude_project_dir_candidates(project):
                 candidates.append(variant)
     return candidates
 
-def latest_claude_artifact(project):
+def collect_claude_artifacts(project):
     candidates = [normalize_path(project)]
     try:
         for entry in os.listdir(project):
@@ -214,22 +249,27 @@ def latest_claude_artifact(project):
     except Exception:
         pass
 
-    best = None
+    artifacts = []
+    seen = set()
     for candidate in candidates:
         for project_dir in claude_project_dir_candidates(candidate):
             artifact_dir = os.path.expanduser('~/.claude/projects/' + project_dir)
             for path in glob.glob(artifact_dir + '/*.jsonl'):
                 try:
                     mtime = os.path.getmtime(path)
-                    if best is None or mtime > best['mtime']:
-                        best = {
-                            'sessionId': os.path.basename(path).replace('.jsonl', ''),
-                            'sessionPath': path,
-                            'mtime': mtime,
-                        }
+                    session_id = os.path.basename(path).replace('.jsonl', '')
+                    if session_id in seen:
+                        continue
+                    seen.add(session_id)
+                    artifacts.append({
+                        'sessionId': session_id,
+                        'sessionPath': path,
+                        'mtime': mtime,
+                    })
                 except Exception:
                     continue
-    return best
+    artifacts.sort(key=lambda item: item.get('mtime', 0), reverse=True)
+    return artifacts
 
 def artifact_status(path, tool):
     if not path:
@@ -285,6 +325,16 @@ def artifact_status(path, tool):
                 return 'ready'
     return 'ready'
 
+def opencode_status(session_id, path):
+    notification = latest_opencode_notification(session_id)
+    if notification:
+        notification_type = notification.get('type', '')
+        if notification_type in ('turn-start', 'session.status'):
+            return 'working' if notification_time_is_fresh(notification) else 'ready'
+        if notification_type in ('turn-complete', 'error'):
+            return 'ready'
+    return artifact_status(path, 'OpenCode')
+
 def has_tool_ancestor(pid):
     ancestor = process_parent_pid(pid)
     visited = set()
@@ -298,7 +348,6 @@ def has_tool_ancestor(pid):
 
 rows = []
 artifact_cache = {}
-found_opencode_row = False
 for pid in filter(str.isdigit, os.listdir('/proc')):
     cmdline = read(f'/proc/{pid}/cmdline').replace('\x00', ' ').strip()
     comm = read(f'/proc/{pid}/comm').strip()
@@ -320,14 +369,12 @@ for pid in filter(str.isdigit, os.listdir('/proc')):
     if artifact is None:
         artifact = (
             latest_codex_artifact(cwd) if tool == 'Codex' else
-            latest_claude_artifact(cwd) if tool == 'Claude' else
+            None if tool == 'Claude' else
             latest_opencode_artifact(cwd)
         )
         artifact_cache[artifact_key] = artifact
     started = process_start_time(pid)
     mtime = artifact.get('mtime') if artifact else started
-    if tool == 'OpenCode':
-        found_opencode_row = True
     rows.append({
         'toolName': tool,
         'sessionId': (artifact or {}).get('sessionId') or 'unknown',
@@ -338,31 +385,29 @@ for pid in filter(str.isdigit, os.listdir('/proc')):
         'terminalName': 'SSH',
         'sessionPath': (artifact or {}).get('sessionPath') or '',
         'detailText': cmd,
-        'status': artifact_status((artifact or {}).get('sessionPath') or '', tool),
+        'status': opencode_status((artifact or {}).get('sessionId') or 'unknown',
+                                  (artifact or {}).get('sessionPath') or '') if tool == 'OpenCode'
+                  else artifact_status((artifact or {}).get('sessionPath') or '', tool),
         'lastActivityEpoch': mtime,
         'processStartedEpoch': started,
         'runtimeSeconds': int(max(0, now - (started or now))),
     })
 
-if not found_opencode_row:
-    artifact = latest_opencode_artifact(project_path)
-    if artifact:
-        mtime = artifact.get('mtime') or now
-        rows.append({
-            'toolName': 'OpenCode',
-            'sessionId': artifact.get('sessionId') or 'unknown',
-            'projectPath': normalize_path(project_path),
-            'processPid': 0,
-            'shellPid': 0,
-            'terminalPid': 0,
-            'terminalName': 'SSH',
-            'sessionPath': artifact.get('sessionPath') or '',
-            'detailText': 'OpenCode session artifact',
-            'status': artifact_status(artifact.get('sessionPath') or '', 'OpenCode'),
-            'lastActivityEpoch': mtime,
-            'processStartedEpoch': mtime,
-            'runtimeSeconds': int(max(0, now - mtime)),
-        })
+rows_by_project_tool = {}
+for row in rows:
+    rows_by_project_tool.setdefault((normalize_path(row.get('projectPath')), row.get('toolName')), []).append(row)
+
+for (project, tool), grouped_rows in rows_by_project_tool.items():
+    if tool == 'Claude':
+        artifacts = collect_claude_artifacts(project)
+        if tool == 'Claude' and artifacts:
+            grouped_rows.sort(key=lambda row: (row.get('processStartedEpoch', 0), row.get('processPid', 0)))
+            assign_count = min(len(grouped_rows), len(artifacts))
+            for index in range(assign_count):
+                grouped_rows[index]['sessionId'] = artifacts[index].get('sessionId') or grouped_rows[index].get('sessionId') or 'unknown'
+                grouped_rows[index]['sessionPath'] = artifacts[index].get('sessionPath') or grouped_rows[index].get('sessionPath') or ''
+                grouped_rows[index]['lastActivityEpoch'] = artifacts[index].get('mtime') or grouped_rows[index].get('lastActivityEpoch') or 0
+                grouped_rows[index]['status'] = artifact_status(grouped_rows[index].get('sessionPath') or '', 'Claude')
 
 print(json.dumps(rows, ensure_ascii=False))
 PY)PYTHON").arg(shellQuote(projectPath));
@@ -437,8 +482,8 @@ QList<ProjectMonitorData> RemoteSessionScanner::scanRemoteVault(const Vault& vau
             : (!session.sessionPath.isEmpty()
                 ? session.sessionPath
                 : QStringLiteral("pid-%1").arg(session.processPid));
-        const QString key = QStringLiteral("%1|%2|%3")
-            .arg(vault.path, session.toolName, dedupeSessionId);
+        const QString key = QStringLiteral("%1|%2|%3|%4")
+            .arg(vault.path, session.toolName, QString::number(session.processPid), dedupeSessionId);
         if (!groupedSessions.contains(key)) {
             groupedSessions.insert(key, session);
             continue;
