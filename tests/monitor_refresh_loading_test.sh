@@ -55,8 +55,8 @@ require_pattern 'm_monitorProgressStep' "$source" \
     "Main monitor loading should advance a frame index for animated row loading."
 require_pattern 'loadingFrames\.at\(' "$source" \
     "Main monitor loading should read the active animated frame from a bounded frame list."
-require_pattern 'row->setText\(3,[[:space:]]*loading[[:space:]]*\?[[:space:]]*QStringLiteral\("%1 %2"\)' "$source" \
-    "Main monitor loading must only change the existing row session text using the animated frame prefix."
+require_pattern 'row->setText\(0,[[:space:]]*loading[[:space:]]*\?[[:space:]]*QStringLiteral\("%1 %2"\)' "$source" \
+    "Main monitor loading must only change the existing project row text using the animated frame prefix."
 forbid_pattern 'struct[[:space:]]+MonitorRowSnapshot' "$header" \
     "Main monitor loading must not introduce a shadow row model that can drift from real session data."
 forbid_pattern 'collectMonitorRowSnapshots' "$header" \

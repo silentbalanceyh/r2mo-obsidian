@@ -107,6 +107,303 @@ constexpr int kMonitorProcessPidRole = Qt::UserRole + 8;
 constexpr int kMonitorSessionIdRole = Qt::UserRole + 9;
 constexpr int kMonitorRowKeyRole = Qt::UserRole + 10;
 constexpr int kMonitorRuntimeRole = Qt::UserRole + 11;
+constexpr int kMonitorGridCellsRole = Qt::UserRole + 12;
+constexpr int kMonitorCopyHitRectsRole = Qt::UserRole + 13;
+constexpr int kMonitorTerminalHitRectsRole = Qt::UserRole + 14;
+
+struct MonitorToolCell {
+    QString toolName;
+    QString toolIconPath;
+    QString sessionId;
+    QString terminalName;
+    QString terminalIconPath;
+    QString restoreCommand;
+    QString rowKey;
+    int toolColumn = 0;
+    int rowIndex = 0;
+    SessionStatus status = SessionStatus::Unknown;
+};
+
+QStringList monitorToolOrder()
+{
+    return {QStringLiteral("Claude"), QStringLiteral("Codex"), QStringLiteral("OpenCode")};
+}
+
+QString monitorToolTitle(const QString& toolName)
+{
+    return toolName == QStringLiteral("OpenCode") ? QStringLiteral("Open Code") : toolName;
+}
+
+QString shellQuote(const QString& value)
+{
+    if (value.isEmpty()) {
+        return QStringLiteral("''");
+    }
+    QString escaped = value;
+    escaped.replace('\'', QStringLiteral("'\"'\"'"));
+    return QStringLiteral("'%1'").arg(escaped);
+}
+
+QString monitorToolRestoreCommand(const SessionInfo& session, const QString& projectPath)
+{
+    const QString sessionId = session.sessionId.trimmed();
+    const bool hasKnownSessionId = !sessionId.isEmpty() && sessionId != QStringLiteral("unknown");
+
+    if (session.toolName == QStringLiteral("Claude")) {
+        return hasKnownSessionId
+            ? QStringLiteral("claude --resume %1").arg(shellQuote(sessionId))
+            : QStringLiteral("claude --continue");
+    }
+
+    if (session.toolName == QStringLiteral("Codex")) {
+        return hasKnownSessionId
+            ? QStringLiteral("codex resume %1").arg(shellQuote(sessionId))
+            : QStringLiteral("codex resume --last");
+    }
+
+    if (session.toolName == QStringLiteral("OpenCode")) {
+        const QString projectArg = projectPath.isEmpty() ? QString() : QStringLiteral(" %1").arg(shellQuote(projectPath));
+        return hasKnownSessionId
+            ? QStringLiteral("opencode --session %1%2").arg(shellQuote(sessionId), projectArg)
+            : QStringLiteral("opencode --continue%1").arg(projectArg);
+    }
+
+    return QString();
+}
+
+QString monitorSessionRowKey(const QString& projectPath, const SessionInfo& session)
+{
+    const QString stableSessionKey = session.sessionId.isEmpty() || session.sessionId == QStringLiteral("unknown")
+        ? QStringLiteral("pid-%1").arg(session.processPid)
+        : session.sessionId;
+    const qint64 stableShellKey = session.shellPid > 0 ? session.shellPid : session.processPid;
+    return QStringLiteral("%1|%2|%3|%4")
+        .arg(projectPath, session.toolName, stableSessionKey, QString::number(stableShellKey));
+}
+
+QList<MonitorToolCell> buildMonitorToolCells(const ProjectMonitorData& projectData, const MainWindow *window)
+{
+    QList<MonitorToolCell> cells;
+    const QStringList tools = monitorToolOrder();
+    QHash<QString, int> nextRows;
+
+    for (const SessionInfo& session : projectData.sessions) {
+        const int toolColumn = tools.indexOf(session.toolName);
+        if (toolColumn < 0) {
+            continue;
+        }
+
+        MonitorToolCell cell;
+        cell.toolName = session.toolName;
+        cell.toolIconPath = SessionScanner::toolIconPath(session.toolName);
+        cell.sessionId = session.sessionId;
+        cell.terminalName = session.terminalName;
+        cell.terminalIconPath = session.terminalIconPath;
+        cell.restoreCommand = monitorToolRestoreCommand(session, projectData.projectPath);
+        Q_UNUSED(window);
+        cell.rowKey = monitorSessionRowKey(projectData.projectPath, session);
+        cell.toolColumn = toolColumn;
+        cell.rowIndex = nextRows.value(session.toolName, 0);
+        cell.status = session.status;
+        cells.append(cell);
+        nextRows.insert(session.toolName, cell.rowIndex + 1);
+    }
+
+    return cells;
+}
+
+QVariantList monitorToolCellsToVariant(const QList<MonitorToolCell>& cells)
+{
+    QVariantList result;
+    for (const MonitorToolCell& cell : cells) {
+        QVariantMap map;
+        map.insert(QStringLiteral("toolName"), cell.toolName);
+        map.insert(QStringLiteral("toolIconPath"), cell.toolIconPath);
+        map.insert(QStringLiteral("sessionId"), cell.sessionId);
+        map.insert(QStringLiteral("terminalName"), cell.terminalName);
+        map.insert(QStringLiteral("terminalIconPath"), cell.terminalIconPath);
+        map.insert(QStringLiteral("restoreCommand"), cell.restoreCommand);
+        map.insert(QStringLiteral("rowKey"), cell.rowKey);
+        map.insert(QStringLiteral("toolColumn"), cell.toolColumn);
+        map.insert(QStringLiteral("rowIndex"), cell.rowIndex);
+        map.insert(QStringLiteral("status"), static_cast<int>(cell.status));
+        result.append(map);
+    }
+    return result;
+}
+
+QList<MonitorToolCell> monitorToolCellsFromVariant(const QVariant& value)
+{
+    QList<MonitorToolCell> cells;
+    const QVariantList list = value.toList();
+    for (const QVariant& item : list) {
+        const QVariantMap map = item.toMap();
+        MonitorToolCell cell;
+        cell.toolName = map.value(QStringLiteral("toolName")).toString();
+        cell.toolIconPath = map.value(QStringLiteral("toolIconPath")).toString();
+        cell.sessionId = map.value(QStringLiteral("sessionId")).toString();
+        cell.terminalName = map.value(QStringLiteral("terminalName")).toString();
+        cell.terminalIconPath = map.value(QStringLiteral("terminalIconPath")).toString();
+        cell.restoreCommand = map.value(QStringLiteral("restoreCommand")).toString();
+        cell.rowKey = map.value(QStringLiteral("rowKey")).toString();
+        cell.toolColumn = map.value(QStringLiteral("toolColumn")).toInt();
+        cell.rowIndex = map.value(QStringLiteral("rowIndex")).toInt();
+        cell.status = static_cast<SessionStatus>(map.value(QStringLiteral("status")).toInt());
+        cells.append(cell);
+    }
+    return cells;
+}
+
+int monitorGridRowCount(const QVariantList& cellList)
+{
+    int rows = 1;
+    for (const QVariant& item : cellList) {
+        const QVariantMap map = item.toMap();
+        rows = qMax(rows, map.value(QStringLiteral("rowIndex")).toInt() + 1);
+    }
+    return rows;
+}
+
+int monitorGridRowHeight(int rowCount)
+{
+    return 8 + qMax(1, rowCount) * 40;
+}
+
+QRect monitorGridColumnRect(const QRect& gridRect, int column)
+{
+    const int columnCount = monitorToolOrder().size();
+    const int left = gridRect.left() + (gridRect.width() * column) / columnCount;
+    const int right = gridRect.left() + (gridRect.width() * (column + 1)) / columnCount;
+    return QRect(left, gridRect.top(), right - left, gridRect.height());
+}
+
+QRect monitorGridCellRect(const QRect& gridRect, int toolColumn, int rowIndex)
+{
+    const QRect columnRect = monitorGridColumnRect(gridRect.adjusted(4, 4, -4, -4), toolColumn);
+    return QRect(columnRect.left() + 6,
+                 columnRect.top() + 2 + rowIndex * 40,
+                 qMax(0, columnRect.width() - 12),
+                 32);
+}
+
+QRect monitorGridCopyButtonRect(const QRect& cellRect)
+{
+    return QRect(cellRect.left() + 42, cellRect.center().y() - 13, 26, 26);
+}
+
+QRect monitorGridTerminalIconRect(const QRect& cellRect)
+{
+    return QRect(cellRect.left() + 10, cellRect.center().y() - 12, 24, 24);
+}
+
+QVariantList monitorGridHitRects(const QRect& gridRect, const QVariantList& cellList, bool copyButtons)
+{
+    QVariantList hits;
+    for (const QVariant& item : cellList) {
+        const QVariantMap cell = item.toMap();
+        const QRect cellRect = monitorGridCellRect(gridRect,
+                                                   cell.value(QStringLiteral("toolColumn")).toInt(),
+                                                   cell.value(QStringLiteral("rowIndex")).toInt());
+        QVariantMap hit;
+        hit.insert(QStringLiteral("rect"),
+                   copyButtons ? monitorGridCopyButtonRect(cellRect) : monitorGridTerminalIconRect(cellRect));
+        hit.insert(QStringLiteral("command"), cell.value(QStringLiteral("restoreCommand")).toString());
+        hit.insert(QStringLiteral("terminalName"), cell.value(QStringLiteral("terminalName")).toString());
+        hits.append(hit);
+    }
+    return hits;
+}
+
+QString monitorProjectGridKey(const QString& projectPath, const QVariantList& cellList)
+{
+    QStringList keys;
+    for (const QVariant& item : cellList) {
+        keys.append(item.toMap().value(QStringLiteral("rowKey")).toString());
+    }
+    keys.sort();
+    return QStringLiteral("%1|%2").arg(projectPath, keys.join('|'));
+}
+
+QString monitorTooltipStyle()
+{
+    if (ThemeManager::instance()->currentTheme() == ThemeManager::Dark) {
+        return QStringLiteral(
+            "QToolTip { color: #ffffff; background: #111827; border: 1px solid #1f2937; "
+            "padding: 6px 8px; font-size: 13px; font-weight: 600; }");
+    }
+
+    return QStringLiteral(
+        "QToolTip { color: #111827; background: #f9fafb; border: 1px solid #d1d5db; "
+        "padding: 6px 8px; font-size: 13px; font-weight: 600; }");
+}
+
+class MonitorBoardHeaderView final : public QHeaderView
+{
+public:
+    explicit MonitorBoardHeaderView(Qt::Orientation orientation, QWidget *parent = nullptr)
+        : QHeaderView(orientation, parent)
+    {
+        setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    }
+
+protected:
+    void paintSection(QPainter *painter, const QRect& rect, int logicalIndex) const override
+    {
+        if (!painter || !rect.isValid()) {
+            return;
+        }
+
+        painter->save();
+        painter->fillRect(rect, QColor("#f5f5f7"));
+        painter->setPen(QColor("#e0e0e0"));
+        painter->drawLine(rect.bottomLeft(), rect.bottomRight());
+
+        if (logicalIndex == 1) {
+            const QStringList tools = monitorToolOrder();
+            for (int col = 0; col < tools.size(); ++col) {
+                const QRect columnRect = monitorGridColumnRect(rect.adjusted(8, 0, -8, 0), col);
+                if (col > 0) {
+                    painter->setPen(QColor("#e5e5ea"));
+                    painter->drawLine(columnRect.topLeft(), columnRect.bottomLeft());
+                }
+
+                const QString toolName = tools.at(col);
+                const QString iconPath = SessionScanner::toolIconPath(toolName);
+                const QRect iconRect(columnRect.left() + 8, rect.center().y() - 9, 18, 18);
+                const QRect textRect(columnRect.left() + 32, rect.top(), columnRect.width() - 40, rect.height());
+                if (!iconPath.isEmpty()) {
+                    QPixmap icon(iconPath);
+                    if (!icon.isNull()) {
+                        painter->drawPixmap(iconRect, icon.scaled(18, 18, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    }
+                }
+
+                QFont titleFont = font();
+                titleFont.setBold(true);
+                painter->setFont(titleFont);
+                painter->setPen(QColor("#4b5563"));
+                painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, monitorToolTitle(toolName));
+            }
+        } else {
+            QFont titleFont = font();
+            titleFont.setBold(true);
+            painter->setFont(titleFont);
+            painter->setPen(QColor("#4b5563"));
+            const QString title = model() ? model()->headerData(logicalIndex, orientation(), Qt::DisplayRole).toString()
+                                          : QString();
+            painter->drawText(rect.adjusted(8, 0, -8, 0), Qt::AlignLeft | Qt::AlignVCenter, title);
+        }
+
+        painter->restore();
+    }
+
+    QSize sectionSizeFromContents(int logicalIndex) const override
+    {
+        QSize size = QHeaderView::sectionSizeFromContents(logicalIndex);
+        size.setHeight(40);
+        return size;
+    }
+};
 
 class SwimlaneQueueWidget final : public QWidget
 {
@@ -179,10 +476,10 @@ private:
     QColor m_emptyBorder;
 };
 
-class MonitorTreeDelegate final : public QStyledItemDelegate
+class MonitorToolGridDelegate : public QStyledItemDelegate
 {
 public:
-    explicit MonitorTreeDelegate(QObject *parent = nullptr)
+    explicit MonitorToolGridDelegate(QObject *parent = nullptr)
         : QStyledItemDelegate(parent)
         , m_animationOffset(0)
     {
@@ -200,10 +497,11 @@ public:
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override
     {
         QSize size = QStyledItemDelegate::sizeHint(option, index);
-        if (index.column() == 4) {
-            size.setWidth(qMax(size.width(), 344));
-            size.setHeight(qMax(size.height(), 30));
-        } else if (index.column() == 5) {
+        if (index.column() == 1) {
+            const QVariantList cells = index.sibling(index.row(), 0).data(kMonitorGridCellsRole).toList();
+            size.setWidth(qMax(size.width(), 560));
+            size.setHeight(qMax(size.height(), monitorGridRowHeight(monitorGridRowCount(cells))));
+        } else if (index.column() == 2) {
             size.setWidth(qMax(size.width(), 96));
             size.setHeight(qMax(size.height(), 30));
         }
@@ -212,11 +510,11 @@ public:
 
     void paint(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override
     {
-        if (index.column() == 4) {
-            paintStatusCell(painter, option, index);
+        if (index.column() == 1) {
+            paintToolGrid(painter, option, index);
             return;
         }
-        if (index.column() == 5) {
+        if (index.column() == 2) {
             paintActionCell(painter, option);
             return;
         }
@@ -229,60 +527,124 @@ private:
         return QRect(option.rect.right() - 82, option.rect.center().y() - 14, 72, 28);
     }
 
-    void paintStatusCell(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const
+    void paintToolGrid(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const
     {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing, true);
 
         const QModelIndex baseIndex = index.sibling(index.row(), 0);
-        const SessionStatus status = static_cast<SessionStatus>(baseIndex.data(kMonitorStatusRole).toInt());
-        const QString statusText = status == SessionStatus::Working
-                ? QCoreApplication::translate("MainWindow", "Working")
-                : QCoreApplication::translate("MainWindow", "Ready");
+        const QList<MonitorToolCell> cells = monitorToolCellsFromVariant(baseIndex.data(kMonitorGridCellsRole));
+        const QStringList tools = monitorToolOrder();
+        const QRect gridRect = option.rect.adjusted(4, 4, -4, -4);
 
-        const QRect contentRect = option.rect.adjusted(8, 5, -8, -5);
-        const int textWidth = qMax(120, option.fontMetrics.horizontalAdvance(statusText) + 16);
-        const QRect textRect(contentRect.right() - textWidth, contentRect.top(), textWidth, contentRect.height());
-        const QRect barRect(contentRect.left(), contentRect.top(), qMax(120, textRect.left() - contentRect.left() - 10), 12);
-        const QRect centeredBarRect(barRect.left(), contentRect.center().y() - 6, barRect.width(), 12);
+        QHash<QString, MonitorToolCell> cellBySlot;
+        for (const MonitorToolCell& cell : cells) {
+            cellBySlot.insert(QStringLiteral("%1:%2").arg(cell.toolColumn).arg(cell.rowIndex), cell);
+        }
 
-        const QColor borderColor = status == SessionStatus::Working ? QColor("#bfe7c8") : QColor("#9bc7ff");
-        const QColor backgroundColor = status == SessionStatus::Working ? QColor("#edf9f0") : QColor("#d9ecff");
-        const QColor fillColor = status == SessionStatus::Working ? QColor("#34c759") : QColor("#4f9cff");
+        for (int col = 0; col < tools.size(); ++col) {
+            const QRect columnRect = monitorGridColumnRect(gridRect, col);
 
-        QPainterPath barPath;
-        barPath.addRoundedRect(centeredBarRect, 6, 6);
-        painter->setPen(QPen(borderColor, 1));
-        painter->setBrush(backgroundColor);
-        painter->drawPath(barPath);
-
-        painter->save();
-        painter->setClipPath(barPath);
-        if (status == SessionStatus::Working) {
-            painter->fillRect(centeredBarRect, fillColor);
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(255, 255, 255, 78));
-            for (int x = centeredBarRect.left() - 24 + m_animationOffset; x < centeredBarRect.right() + 24; x += 24) {
-                QPolygon stripe;
-                stripe << QPoint(x, centeredBarRect.top())
-                       << QPoint(x + 10, centeredBarRect.top())
-                       << QPoint(x + 20, centeredBarRect.bottom())
-                       << QPoint(x + 10, centeredBarRect.bottom());
-                painter->drawPolygon(stripe);
+            painter->setPen(QColor("#e5e5ea"));
+            if (col > 0) {
+                painter->drawLine(columnRect.topLeft(), columnRect.bottomLeft());
             }
-        } else {
-            painter->fillRect(centeredBarRect, fillColor);
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(255, 255, 255, 92));
-            for (int x = centeredBarRect.left() + 6; x < centeredBarRect.right(); x += 18) {
-                painter->drawRect(QRect(x, centeredBarRect.top(), 6, centeredBarRect.height()));
+
+            const int rowCount = monitorGridRowCount(baseIndex.data(kMonitorGridCellsRole).toList());
+            for (int row = 0; row < rowCount; ++row) {
+                const QRect cellRect = monitorGridCellRect(gridRect, col, row);
+                const QString slotKey = QStringLiteral("%1:%2").arg(col).arg(row);
+                const bool hasCell = cellBySlot.contains(slotKey);
+
+                QPainterPath cardPath;
+                cardPath.addRoundedRect(cellRect, 7, 7);
+                painter->setPen(QPen(hasCell ? QColor("#d8dee9") : QColor("#edf0f5"), 1));
+                painter->setBrush(hasCell ? QColor("#fbfcff") : QColor("#f8f9fb"));
+                painter->drawPath(cardPath);
+
+                if (!hasCell) {
+                    continue;
+                }
+
+                const MonitorToolCell cell = cellBySlot.value(slotKey);
+                const QRect terminalRect = monitorGridTerminalIconRect(cellRect);
+                if (!cell.terminalIconPath.isEmpty()) {
+                    QPixmap terminalPix(cell.terminalIconPath);
+                    if (!terminalPix.isNull()) {
+                        painter->drawPixmap(terminalRect,
+                                            terminalPix.scaled(24, 24, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    }
+                }
+
+                const QRect toolIconRect(terminalRect.right() + 8, cellRect.center().y() - 9, 18, 18);
+                if (!cell.toolIconPath.isEmpty()) {
+                    QPixmap toolPix(cell.toolIconPath);
+                    if (!toolPix.isNull()) {
+                        painter->drawPixmap(toolIconRect,
+                                            toolPix.scaled(18, 18, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    }
+                }
+
+                const QRect copyRect = monitorGridCopyButtonRect(cellRect);
+                painter->setPen(QPen(QColor("#c6ccd6"), 1));
+                painter->setBrush(QColor("#ffffff"));
+                painter->drawRoundedRect(copyRect, 6, 6);
+                painter->setPen(QPen(QColor("#596273"), 1.2));
+                painter->setBrush(Qt::NoBrush);
+                painter->drawRect(copyRect.adjusted(8, 7, -7, -10));
+                painter->drawRect(copyRect.adjusted(6, 9, -9, -8));
+
+                const int availableBarWidth = qMax(36, cellRect.right() - copyRect.right() - 24);
+                const int barWidth = qMax(28, availableBarWidth / 3);
+                const QString statusText = cell.status == SessionStatus::Working
+                    ? QCoreApplication::translate("MainWindow", "Working")
+                    : QCoreApplication::translate("MainWindow", "Ready");
+                const int statusTextWidth = qMax(52, option.fontMetrics.horizontalAdvance(statusText) + 8);
+                const QRect statusTextRect(cellRect.right() - statusTextWidth - 8,
+                                           cellRect.top(),
+                                           statusTextWidth,
+                                           cellRect.height());
+                const QRect barRect(copyRect.right() + 16,
+                                    cellRect.center().y() - 5,
+                                    qMin(barWidth, qMax(24, statusTextRect.left() - (copyRect.right() + 24))),
+                                    10);
+                const QColor borderColor = cell.status == SessionStatus::Working ? QColor("#bfe7c8") : QColor("#9bc7ff");
+                const QColor backgroundColor = cell.status == SessionStatus::Working ? QColor("#edf9f0") : QColor("#d9ecff");
+                const QColor fillColor = cell.status == SessionStatus::Working ? QColor("#34c759") : QColor("#4f9cff");
+
+                QPainterPath barPath;
+                barPath.addRoundedRect(barRect, 5, 5);
+                painter->setPen(QPen(borderColor, 1));
+                painter->setBrush(backgroundColor);
+                painter->drawPath(barPath);
+
+                painter->save();
+                painter->setClipPath(barPath);
+                painter->fillRect(barRect, fillColor);
+                painter->setPen(Qt::NoPen);
+                painter->setBrush(cell.status == SessionStatus::Working ? QColor(255, 255, 255, 78)
+                                                                         : QColor(255, 255, 255, 92));
+                if (cell.status == SessionStatus::Working) {
+                    for (int x = barRect.left() - 24 + m_animationOffset; x < barRect.right() + 24; x += 24) {
+                        QPolygon stripe;
+                        stripe << QPoint(x, barRect.top())
+                               << QPoint(x + 10, barRect.top())
+                               << QPoint(x + 20, barRect.bottom())
+                               << QPoint(x + 10, barRect.bottom());
+                        painter->drawPolygon(stripe);
+                    }
+                } else {
+                    for (int x = barRect.left() + 6; x < barRect.right(); x += 18) {
+                        painter->drawRect(QRect(x, barRect.top(), 6, barRect.height()));
+                    }
+                }
+                painter->restore();
+
+                painter->setPen(cell.status == SessionStatus::Working ? QColor("#34c759") : QColor("#4f9cff"));
+                painter->drawText(statusTextRect, Qt::AlignRight | Qt::AlignVCenter, statusText);
             }
         }
-        painter->restore();
 
-        painter->setPen(status == SessionStatus::Working ? QColor("#34c759") : QColor("#007aff"));
-        painter->setFont(option.font);
-        painter->drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, statusText);
         painter->restore();
     }
 
@@ -326,6 +688,15 @@ private:
     }
 
     int m_animationOffset;
+};
+
+class MonitorTreeDelegate final : public QStyledItemDelegate
+{
+public:
+    explicit MonitorTreeDelegate(QObject *parent = nullptr)
+        : QStyledItemDelegate(parent)
+    {
+    }
 };
 }
 
@@ -4524,7 +4895,22 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         if (mouseEvent->button() == Qt::LeftButton) {
             if (QTreeWidget *tree = qobject_cast<QTreeWidget*>(watched->parent())) {
                 const QModelIndex index = tree->indexAt(mouseEvent->pos());
-                if (index.isValid() && index.column() == 5) {
+                if (index.isValid() && index.column() == 1) {
+                    if (QTreeWidgetItem *item = tree->itemFromIndex(index)) {
+                        const QRect gridRect = tree->visualRect(index);
+                        const QVariantList cells = item->data(0, kMonitorGridCellsRole).toList();
+                        const QVariantList copyHits = monitorGridHitRects(gridRect, cells, true);
+                        item->setData(0, kMonitorCopyHitRectsRole, copyHits);
+                        for (const QVariant& hitValue : copyHits) {
+                            const QVariantMap hit = hitValue.toMap();
+                            if (hit.value(QStringLiteral("rect")).toRect().contains(mouseEvent->pos())) {
+                                copyMonitorRestoreCommand(hit.value(QStringLiteral("command")).toString());
+                                return true;
+                            }
+                        }
+                    }
+                }
+                if (index.isValid() && index.column() == 2) {
                     if (QTreeWidgetItem *item = tree->itemFromIndex(index)) {
                         openMonitorTarget(item);
                         return true;
@@ -4532,6 +4918,33 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                 }
             }
         }
+    }
+
+    if (watched->property("isMonitorTreeViewport").toBool() && event->type() == QEvent::ToolTip) {
+        auto *helpEvent = static_cast<QHelpEvent*>(event);
+        if (QTreeWidget *tree = qobject_cast<QTreeWidget*>(watched->parent())) {
+            const QModelIndex index = tree->indexAt(helpEvent->pos());
+            if (index.isValid() && index.column() == 1) {
+                if (QTreeWidgetItem *item = tree->itemFromIndex(index)) {
+                    const QRect gridRect = tree->visualRect(index);
+                    const QVariantList cells = item->data(0, kMonitorGridCellsRole).toList();
+                    const QVariantList terminalHits = monitorGridHitRects(gridRect, cells, false);
+                    item->setData(0, kMonitorTerminalHitRectsRole, terminalHits);
+                    for (const QVariant& hitValue : terminalHits) {
+                        const QVariantMap hit = hitValue.toMap();
+                        if (hit.value(QStringLiteral("rect")).toRect().contains(helpEvent->pos())) {
+                            const QString terminalName = hit.value(QStringLiteral("terminalName")).toString();
+                            if (!terminalName.isEmpty()) {
+                                tree->viewport()->setStyleSheet(monitorTooltipStyle());
+                                QToolTip::showText(helpEvent->globalPos(), terminalName, tree->viewport());
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        QToolTip::hideText();
     }
 
     if (m_specialMonitorTable && watched == m_specialMonitorTable->viewport() &&
@@ -5004,9 +5417,8 @@ void MainWindow::setMonitorRowsLoading(bool loading)
             continue;
         }
 
-        const QString sessionId = row->data(0, kMonitorSessionIdRole).toString();
-        const QString displaySessionId = sessionId.isEmpty() ? tr("No Session") : sessionId;
-        row->setText(3, loading ? QStringLiteral("%1 %2").arg(frame, displaySessionId) : displaySessionId);
+        const QString projectName = row->data(0, kMonitorProjectNameRole).toString();
+        row->setText(0, loading ? QStringLiteral("%1 %2").arg(frame, projectName) : projectName);
     }
 
     tree->viewport()->update();
@@ -5142,6 +5554,19 @@ QString MainWindow::monitorRowKey(const QString& projectPath, const SessionInfo&
         .arg(projectPath, session.toolName, stableSessionKey, QString::number(stableShellKey));
 }
 
+void MainWindow::copyMonitorRestoreCommand(const QString& command)
+{
+    if (command.trimmed().isEmpty()) {
+        return;
+    }
+
+    QApplication::clipboard()->setText(command, QClipboard::Clipboard);
+#if defined(Q_OS_LINUX)
+    QApplication::clipboard()->setText(command, QClipboard::Selection);
+#endif
+    statusBar()->showMessage(tr("Restore command copied"), 2000);
+}
+
 void MainWindow::updateMonitorStatusLabel(QWidget *label, SessionStatus status) const
 {
     Q_UNUSED(label);
@@ -5159,11 +5584,25 @@ bool MainWindow::updateMonitorStatusCells(const QList<ProjectMonitorData>& data)
         return false;
     }
 
-    QList<QPair<QString, SessionStatus>> expectedRows;
+    struct ExpectedMonitorRow {
+        QString key;
+        QString projectName;
+        QVariantList cells;
+        int rowHeight;
+    };
+
+    QList<ExpectedMonitorRow> expectedRows;
     for (const ProjectMonitorData& pmd : data) {
-        for (const SessionInfo& si : pmd.sessions) {
-            expectedRows.append(qMakePair(monitorRowKey(pmd.projectPath, si), si.status));
+        if (pmd.sessions.isEmpty()) {
+            continue;
         }
+        const QVariantList cells = monitorToolCellsToVariant(buildMonitorToolCells(pmd, this));
+        expectedRows.append(ExpectedMonitorRow{
+            monitorProjectGridKey(pmd.projectPath, cells),
+            pmd.projectName,
+            cells,
+            monitorGridRowHeight(monitorGridRowCount(cells))
+        });
     }
 
     if (tree->topLevelItemCount() != expectedRows.size()) {
@@ -5175,7 +5614,7 @@ bool MainWindow::updateMonitorStatusCells(const QList<ProjectMonitorData>& data)
         if (!row) {
             return false;
         }
-        if (row->data(0, kMonitorRowKeyRole).toString() != expectedRows[i].first) {
+        if (row->data(0, kMonitorRowKeyRole).toString() != expectedRows[i].key) {
             return false;
         }
     }
@@ -5186,9 +5625,10 @@ bool MainWindow::updateMonitorStatusCells(const QList<ProjectMonitorData>& data)
             continue;
         }
 
-        const SessionStatus status = expectedRows[i].second;
-        row->setData(0, kMonitorStatusRole, static_cast<int>(status));
-        row->setData(0, Qt::DisplayRole, row->data(0, Qt::DisplayRole));
+        row->setText(0, expectedRows[i].projectName);
+        row->setData(0, kMonitorProjectNameRole, expectedRows[i].projectName);
+        row->setData(0, kMonitorGridCellsRole, expectedRows[i].cells);
+        row->setSizeHint(1, QSize(0, expectedRows[i].rowHeight));
     }
 
     tree->viewport()->update();
@@ -5229,11 +5669,11 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
     QTreeWidget *tree = new QTreeWidget();
     tree->setObjectName("monitorBoardTree");
     tree->setHeaderLabels(QStringList()
-        << tr("Project") << tr("Terminal") << tr("AI Tool")
-        << tr("Session") << tr("Status") << tr("Action"));
+        << tr("Project") << QString() << tr("Action"));
+    tree->setHeader(new MonitorBoardHeaderView(Qt::Horizontal, tree));
     tree->setRootIsDecorated(false);
     tree->setAlternatingRowColors(true);
-    tree->setUniformRowHeights(true);
+    tree->setUniformRowHeights(false);
     tree->setSelectionMode(QAbstractItemView::NoSelection);
     tree->setTextElideMode(Qt::ElideMiddle);
     tree->setProperty("isMonitorTree", true);
@@ -5249,20 +5689,17 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
     tree->header()->setSectionResizeMode(0, QHeaderView::Fixed);
     tree->header()->setSectionResizeMode(1, QHeaderView::Fixed);
     tree->header()->setSectionResizeMode(2, QHeaderView::Fixed);
-    tree->header()->setSectionResizeMode(3, QHeaderView::Fixed);
-    tree->header()->setSectionResizeMode(4, QHeaderView::Fixed);
-    tree->header()->setSectionResizeMode(5, QHeaderView::Fixed);
     tree->setStyleSheet(
         "QTreeWidget { border: 1px solid #e8e8ed; border-radius: 6px; background: white; }"
         "QTreeWidget::item { padding: 6px 10px; border-bottom: 1px solid #f5f5f7; }"
         "QTreeWidget::item:selected { background: #e8f4fd; color: #1d1d1f; }"
-        "QHeaderView::section { background: #f5f5f7; color: #86868b; font-size: 14px; font-weight: 600; padding: 6px 4px; border: none; border-bottom: 1px solid #e0e0e0; }"
+        "QHeaderView::section { background: #f5f5f7; color: #6b7280; font-size: 14px; font-weight: 700; padding: 6px 8px; border: none; border-bottom: 1px solid #e0e0e0; }"
     );
     connect(tree, &QTreeWidget::itemDoubleClicked, this,
             [this](QTreeWidgetItem *item, int) {
                 openMonitorTarget(item);
             });
-    tree->setItemDelegate(new MonitorTreeDelegate(tree));
+    tree->setItemDelegate(new MonitorToolGridDelegate(tree));
 
     if (monitorData.isEmpty()) {
         QTreeWidgetItem *emptyItem = new QTreeWidgetItem(tree);
@@ -5270,66 +5707,25 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
         emptyItem->setForeground(0, QColor("#86868b"));
         emptyItem->setFirstColumnSpanned(true);
     } else {
-        QString lastProjectName;
         for (const ProjectMonitorData& pmd : monitorData) {
             if (pmd.sessions.isEmpty()) {
                 continue;
             }
 
-            for (const SessionInfo& si : pmd.sessions) {
-                QTreeWidgetItem *row = new QTreeWidgetItem(tree);
-
-                // Col 0: Project (dedup - only show once)
-                if (pmd.projectName == lastProjectName) {
-                    row->setText(0, QString());
-                } else {
-                    row->setText(0, pmd.projectName);
-                    lastProjectName = pmd.projectName;
-                }
-                row->setToolTip(0, pmd.projectPath);
-
-                // Col 1: Terminal
-                row->setText(1, si.terminalName);
-                row->setToolTip(1, si.terminalName);
-                if (!si.terminalIconPath.isEmpty()) {
-                    QPixmap terminalPix(si.terminalIconPath);
-                    if (!terminalPix.isNull()) {
-                        row->setIcon(1, QIcon(terminalPix.scaled(14, 14, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
-                    }
-                }
-
-                // Col 2: AI Tool with icon
-                row->setText(2, si.toolName);
-                row->setToolTip(2, si.toolName);
-                if (!si.toolIconPath.isEmpty()) {
-                    QPixmap pix(si.toolIconPath);
-                    if (!pix.isNull()) {
-                        row->setIcon(2, QIcon(pix.scaled(16, 16, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
-                    }
-                }
-
-                // Col 3: Session ID (from tool config, not PID)
-                QString displaySessionId = si.sessionId;
-                row->setText(3, displaySessionId);
-                row->setToolTip(3, QString("Session: %1\nTool: %2\nPath: %3").arg(si.sessionId, si.toolName, si.projectPath));
-
-                // Col 4: Status
-                row->setText(4, si.status == SessionStatus::Working ? tr("Working") : tr("Ready"));
-                row->setText(5, tr("Goto"));
-
-                row->setData(0, kMonitorProjectPathRole, pmd.projectPath);
-                row->setData(0, kMonitorTerminalNameRole, si.terminalName);
-                row->setData(0, kMonitorTerminalPidRole, si.terminalPid);
-                row->setData(0, kMonitorToolNameRole, si.toolName);
-                row->setData(0, kMonitorDetailRole, si.detailText);
-                row->setData(0, kMonitorSessionPathRole, si.sessionPath);
-                row->setData(0, kMonitorStatusRole, static_cast<int>(si.status));
-                row->setData(0, kMonitorProjectNameRole, pmd.projectName);
-                row->setData(0, kMonitorProcessPidRole, si.processPid);
-                row->setData(0, kMonitorSessionIdRole, si.sessionId);
-                row->setData(0, kMonitorRowKeyRole, monitorRowKey(pmd.projectPath, si));
-                row->setData(0, kMonitorRuntimeRole, si.runtimeSeconds);
+            const QVariantList cells = monitorToolCellsToVariant(buildMonitorToolCells(pmd, this));
+            QTreeWidgetItem *row = new QTreeWidgetItem(tree);
+            row->setText(0, pmd.projectName);
+            row->setText(2, tr("Goto"));
+            row->setToolTip(0, pmd.projectPath);
+            row->setToolTip(1, tr("Click a copy button to copy the restore command. Hover terminal icons to see terminal type."));
+            row->setData(0, kMonitorProjectPathRole, pmd.projectPath);
+            row->setData(0, kMonitorProjectNameRole, pmd.projectName);
+            row->setData(0, kMonitorGridCellsRole, cells);
+            row->setData(0, kMonitorRowKeyRole, monitorProjectGridKey(pmd.projectPath, cells));
+            if (!pmd.sessions.isEmpty()) {
+                row->setData(0, kMonitorTerminalPidRole, pmd.sessions.first().terminalPid);
             }
+            row->setSizeHint(1, QSize(0, monitorGridRowHeight(monitorGridRowCount(cells))));
         }
     }
 
@@ -5382,7 +5778,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
 
 void MainWindow::updateMonitorTableColumns(QTreeWidget *tree)
 {
-    if (!tree || tree->columnCount() < 6) {
+    if (!tree || tree->columnCount() < 3) {
         return;
     }
 
@@ -5391,51 +5787,13 @@ void MainWindow::updateMonitorTableColumns(QTreeWidget *tree)
         return;
     }
 
-    int projectWidth = qBound(150, viewportWidth / 8, 240);
-    int terminalWidth = viewportWidth < 820 ? 108 : (viewportWidth < 1120 ? 124 : 144);
-    int toolWidth = viewportWidth < 820 ? 136 : (viewportWidth < 1120 ? 168 : 196);
-    int statusWidth = viewportWidth < 820 ? 344 : 372;
+    int projectWidth = qBound(150, viewportWidth / 6, 260);
     int actionWidth = viewportWidth < 820 ? 104 : 128;
-    const int minProjectWidth = 112;
-    const int minTerminalWidth = 96;
-    const int minToolWidth = 128;
-    const int minStatusWidth = 336;
-    const int minActionWidth = 96;
-    const int minSessionWidth = 180;
-    const int chromeWidth = 6;
-
-    auto sessionWidth = [&]() {
-        return viewportWidth - (projectWidth + terminalWidth + toolWidth + statusWidth + actionWidth + chromeWidth);
-    };
-
-    auto shrinkToFit = [&](int &value, int minValue) {
-        const int deficit = minSessionWidth - sessionWidth();
-        if (deficit <= 0 || value <= minValue) {
-            return;
-        }
-        const int delta = qMin(deficit, value - minValue);
-        value -= delta;
-    };
-
-    shrinkToFit(projectWidth, minProjectWidth);
-    shrinkToFit(terminalWidth, minTerminalWidth);
-    shrinkToFit(toolWidth, minToolWidth);
-    shrinkToFit(statusWidth, minStatusWidth);
-    shrinkToFit(actionWidth, minActionWidth);
-
-    int finalSessionWidth = qMax(minSessionWidth, sessionWidth());
-    const int extraWidth = viewportWidth - (projectWidth + terminalWidth + toolWidth + finalSessionWidth + statusWidth + actionWidth + chromeWidth);
-    if (extraWidth > 0) {
-        finalSessionWidth += (extraWidth * 2) / 3;
-        projectWidth += extraWidth / 3;
-    }
+    const int gridWidth = qMax(420, viewportWidth - projectWidth - actionWidth - 6);
 
     tree->setColumnWidth(0, projectWidth);
-    tree->setColumnWidth(1, terminalWidth);
-    tree->setColumnWidth(2, toolWidth);
-    tree->setColumnWidth(3, finalSessionWidth);
-    tree->setColumnWidth(4, statusWidth);
-    tree->setColumnWidth(5, actionWidth);
+    tree->setColumnWidth(1, gridWidth);
+    tree->setColumnWidth(2, actionWidth);
 }
 
 bool MainWindow::activateTerminalWindow(qint64 pid)

@@ -199,6 +199,7 @@ private:
     QString formatSessionRuntime(qint64 runtimeSeconds) const;
     bool updateMonitorStatusCells(const QList<ProjectMonitorData>& data);
     QString monitorRowKey(const QString& projectPath, const SessionInfo& session) const;
+    void copyMonitorRestoreCommand(const QString& command);
     void updateMonitorStatusLabel(QWidget *label, SessionStatus status) const;
     void showSessionDetailDialog(const SessionInfo& session);
     void syncVaultOrderFromList();
