@@ -734,10 +734,16 @@ SessionStatus SessionScanner::inferCodexArtifactStatus(const QString& sessionPat
 SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPath) const
 {
     const double claudeActiveFreshSeconds = 8.0;
+    const double claudeReadyFreshSeconds = 45.0;
     const QByteArray tail = readArtifactTail(sessionPath);
     if (tail.isEmpty()) {
         return SessionStatus::Unknown;
     }
+
+    const QFileInfo sessionFile(sessionPath);
+    const QDateTime artifactModifiedAt = sessionFile.exists() && sessionFile.lastModified().isValid()
+        ? sessionFile.lastModified().toUTC()
+        : QDateTime();
 
     const QList<QJsonObject> objects = parseRecentJsonObjects(tail);
     if (objects.isEmpty()) {
@@ -748,10 +754,13 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
         const QString type = object.value("type").toString();
         const QString subtype = object.value("subtype").toString();
         const QDateTime eventTime = parseArtifactEventTime(object);
+        const QDateTime freshBaseTime = eventTime.isValid() ? eventTime : artifactModifiedAt;
         const bool eventIsFresh = eventTime.isValid() &&
             eventTime.secsTo(QDateTime::currentDateTimeUtc()) <= claudeActiveFreshSeconds;
+        const bool readyStateIsFresh = freshBaseTime.isValid() &&
+            freshBaseTime.secsTo(QDateTime::currentDateTimeUtc()) <= claudeReadyFreshSeconds;
         if (subtype == "stop_hook_summary") {
-            return SessionStatus::Ready;
+            return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
         }
 
         if (type == "attachment") {
@@ -764,7 +773,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
             if (hookEvent == "Stop" ||
                 attachmentType == "hook_success" ||
                 attachmentType == "async_hook_response") {
-                return SessionStatus::Ready;
+                return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
             }
             continue;
         }
@@ -776,7 +785,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
                 return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
             }
             if (hookEvent == "Stop") {
-                return SessionStatus::Ready;
+                return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
             }
             continue;
         }
@@ -788,14 +797,14 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
                 return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
             }
             if (stopReason == "end_turn") {
-                return SessionStatus::Ready;
+                return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
             }
             continue;
         }
 
         if (type == "system") {
             if (subtype == "turn_duration" || subtype == "away_summary") {
-                return SessionStatus::Ready;
+                return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
             }
             continue;
         }
@@ -804,7 +813,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
             type == "last-prompt" ||
             type == "file-history-snapshot" ||
             type == "permission-mode") {
-            return SessionStatus::Ready;
+            return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
         }
 
         if (type == "tool_use") {

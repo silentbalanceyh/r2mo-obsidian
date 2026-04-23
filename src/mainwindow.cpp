@@ -71,6 +71,7 @@
 #include <QCheckBox>
 #include <QFutureWatcher>
 #include <QPlainTextEdit>
+#include <QPalette>
 #ifdef Q_OS_MAC
 #include <mach/mach.h>
 #endif
@@ -131,7 +132,7 @@ QStringList monitorToolOrder()
 
 QString monitorToolTitle(const QString& toolName)
 {
-    return toolName == QStringLiteral("OpenCode") ? QStringLiteral("Open Code") : toolName;
+    return toolName;
 }
 
 QString shellQuote(const QString& value)
@@ -286,14 +287,16 @@ QRect monitorGridCellRect(const QRect& gridRect, int toolColumn, int rowIndex)
                  32);
 }
 
-QRect monitorGridCopyButtonRect(const QRect& cellRect)
-{
-    return QRect(cellRect.left() + 42, cellRect.center().y() - 13, 26, 26);
-}
-
 QRect monitorGridTerminalIconRect(const QRect& cellRect)
 {
     return QRect(cellRect.left() + 10, cellRect.center().y() - 12, 24, 24);
+}
+
+QRect monitorGridCopyButtonRect(const QRect& cellRect)
+{
+    const QRect terminalRect = monitorGridTerminalIconRect(cellRect);
+    const QRect toolIconRect(terminalRect.right() + 8, cellRect.center().y() - 9, 18, 18);
+    return QRect(toolIconRect.right() + 10, cellRect.center().y() - 13, 26, 26);
 }
 
 QVariantList monitorGridHitRects(const QRect& gridRect, const QVariantList& cellList, bool copyButtons)
@@ -335,6 +338,23 @@ QString monitorTooltipStyle()
     return QStringLiteral(
         "QToolTip { color: #111827; background: #f9fafb; border: 1px solid #d1d5db; "
         "padding: 6px 8px; font-size: 13px; font-weight: 600; }");
+}
+
+void applyMonitorTooltipPalette()
+{
+    QPalette palette = QToolTip::palette();
+    if (ThemeManager::instance()->currentTheme() == ThemeManager::Dark) {
+        palette.setColor(QPalette::ToolTipBase, QColor("#111827"));
+        palette.setColor(QPalette::ToolTipText, QColor("#ffffff"));
+        palette.setColor(QPalette::Base, QColor("#111827"));
+        palette.setColor(QPalette::Text, QColor("#ffffff"));
+    } else {
+        palette.setColor(QPalette::ToolTipBase, QColor("#f9fafb"));
+        palette.setColor(QPalette::ToolTipText, QColor("#111827"));
+        palette.setColor(QPalette::Base, QColor("#f9fafb"));
+        palette.setColor(QPalette::Text, QColor("#111827"));
+    }
+    QToolTip::setPalette(palette);
 }
 
 class MonitorBoardHeaderView final : public QHeaderView
@@ -599,7 +619,7 @@ private:
                 const QString statusText = cell.status == SessionStatus::Working
                     ? QCoreApplication::translate("MainWindow", "Working")
                     : QCoreApplication::translate("MainWindow", "Ready");
-                const int statusTextWidth = qMax(52, option.fontMetrics.horizontalAdvance(statusText) + 8);
+                const int statusTextWidth = qMax(72, option.fontMetrics.horizontalAdvance(statusText) + 12);
                 const QRect statusTextRect(cellRect.right() - statusTextWidth - 8,
                                            cellRect.top(),
                                            statusTextWidth,
@@ -641,6 +661,9 @@ private:
                 painter->restore();
 
                 painter->setPen(cell.status == SessionStatus::Working ? QColor("#34c759") : QColor("#4f9cff"));
+                QFont statusFont = option.font;
+                statusFont.setBold(true);
+                painter->setFont(statusFont);
                 painter->drawText(statusTextRect, Qt::AlignRight | Qt::AlignVCenter, statusText);
             }
         }
@@ -4935,6 +4958,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                         if (hit.value(QStringLiteral("rect")).toRect().contains(helpEvent->pos())) {
                             const QString terminalName = hit.value(QStringLiteral("terminalName")).toString();
                             if (!terminalName.isEmpty()) {
+                                applyMonitorTooltipPalette();
                                 tree->viewport()->setStyleSheet(monitorTooltipStyle());
                                 QToolTip::showText(helpEvent->globalPos(), terminalName, tree->viewport());
                                 return true;

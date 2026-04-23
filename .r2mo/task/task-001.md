@@ -23,3 +23,4 @@ author:
 
 ## Changes
 - 2026-04-23: [Team Leader] 完成 task-001：将 Monitor Board 从 Terminal/AI Tool/Session/Status 四列重构为 Project | AI Sessions Grid | Action 三列；中间区域改为固定 Claude / Codex / Open Code 三列的 Grid，并按项目内各工具会话数自动扩展为多行；每个单元格显示终端图标、复制恢复命令按钮与纯进度条状态，终端图标支持 Hover 展示终端类型，复制按钮会按工具生成不同恢复命令写入剪贴板；同步补充并更新 `tests/task_001_monitor_grid_guard_test.sh`、`tests/monitor_refresh_loading_test.sh`、`tests/task_002_monitor_status_test.sh`、`tests/task_002_monitor_runtime_display_guard_test.sh` 守护验证，且已通过 `cmake -B build` 与 `cmake --build build`。
+- 2026-04-23: [Team Leader] 追加监控板细节修复：中间表头统一显示 `Claude` / `Codex` / `OpenCode`，修复浅色模式 tooltip 白字不可读问题，调整单元格复制按钮/AI 工具图标间距与右侧 `Working` / `Ready` 状态文字可见性，并让 Claude 旧的 Ready 类 artifact 事件过期后回退到实时状态推断，避免活跃 Claude 进程被陈旧 `end_turn` / `Stop` / `away_summary` 状态压成 Ready；新增 `tests/task_003_claude_ready_freshness_guard_test.sh` 守护验证。
