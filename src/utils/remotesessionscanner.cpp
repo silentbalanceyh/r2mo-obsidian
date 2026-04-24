@@ -221,6 +221,22 @@ def notification_time_is_fresh(notification):
     except Exception:
         return False
 
+def event_time_is_fresh(obj, active_fresh_seconds=30.0):
+    raw = obj.get('timestamp') or obj.get('time') or obj.get('created_at') or ''
+    if not raw:
+        return now - os.path.getmtime(obj.get('__path', '')) <= active_fresh_seconds if obj.get('__path') else False
+    try:
+        if isinstance(raw, (int, float)):
+            timestamp = float(raw)
+            if timestamp > 100000000000:
+                timestamp = timestamp / 1000.0
+            return now - timestamp <= active_fresh_seconds
+        value = str(raw).replace('Z', '+00:00')
+        parsed = __import__('datetime').datetime.fromisoformat(value)
+        return now - parsed.timestamp() <= active_fresh_seconds
+    except Exception:
+        return False
+
 def claude_project_dir_candidates(project):
     normalized = normalize_path(project).strip('/')
     if not normalized:
@@ -297,42 +313,82 @@ def artifact_status(path, tool):
         except Exception:
             continue
         typ = obj.get('type', '')
+        obj['__path'] = path
+        event_is_fresh = event_time_is_fresh(obj)
         if tool == 'Codex':
             if typ == 'task_complete':
                 return 'ready'
             if typ == 'task_started':
-                return 'working' if now - os.path.getmtime(path) <= 10 else 'ready'
+                return 'working' if event_is_fresh else 'ready'
             payload = obj.get('payload') or {}
             payload_type = payload.get('type', '')
             if payload_type in ('exec_command_begin', 'function_call_begin', 'patch_apply_begin', 'agent_reasoning'):
-                return 'working' if now - os.path.getmtime(path) <= 10 else 'ready'
-            if payload_type in ('exec_command_end', 'function_call_output', 'patch_apply_end', 'user_message', 'message'):
+                return 'working' if event_is_fresh else 'ready'
+            if payload_type in ('exec_command_end', 'function_call_output', 'patch_apply_end'):
+                return 'working' if event_is_fresh else 'ready'
+            if payload_type in ('user_message', 'message'):
                 return 'ready'
         if tool == 'Claude':
             if typ == 'assistant':
                 stop_reason = (obj.get('message') or {}).get('stop_reason', '')
                 if stop_reason == 'tool_use':
-                    return 'working'
+                    return 'working' if event_is_fresh else 'ready'
                 if stop_reason == 'end_turn':
                     return 'ready'
             attachment = obj.get('attachment') or {}
             hook = attachment.get('hookEvent', '')
-            if hook in ('PreToolUse', 'PostToolUse'):
-                return 'working' if now - os.path.getmtime(path) <= 10 else 'ready'
+            if hook == 'PreToolUse':
+                return 'working' if event_is_fresh else 'ready'
+            if hook == 'PostToolUse':
+                return 'ready'
             if hook == 'Stop' or attachment.get('type') in ('hook_success', 'async_hook_response'):
+                return 'ready'
+            data = obj.get('data') or {}
+            progress_hook = data.get('hookEvent', '')
+            if progress_hook == 'PreToolUse':
+                return 'working' if event_is_fresh else 'ready'
+            if progress_hook in ('PostToolUse', 'Stop'):
                 return 'ready'
             if typ == 'system' and obj.get('subtype') in ('turn_duration', 'away_summary'):
                 return 'ready'
     return 'ready'
 
+def first_status_scalar(value):
+    if isinstance(value, str):
+        return value.strip().lower()
+    if isinstance(value, dict):
+        for key in ('status', 'state', 'phase', 'value'):
+            nested = first_status_scalar(value.get(key))
+            if nested:
+                return nested
+    if isinstance(value, list):
+        for item in value:
+            nested = first_status_scalar(item)
+            if nested:
+                return nested
+    return ''
+
+def is_active_status_word(value):
+    return value in ('working', 'running', 'busy', 'streaming', 'thinking', 'generating', 'pending')
+
+def is_ready_status_word(value):
+    return value in ('ready', 'idle', 'paused', 'complete', 'completed', 'done', 'error', 'failed')
+
 def opencode_status(session_id, path):
     notification = latest_opencode_notification(session_id)
     if notification:
         notification_type = notification.get('type', '')
-        if notification_type in ('turn-start', 'session.status'):
+        if notification_type == 'turn-start':
             return 'working' if notification_time_is_fresh(notification) else 'ready'
         if notification_type in ('turn-complete', 'error'):
             return 'ready'
+        if notification_type == 'session.status':
+            status_value = first_status_scalar(notification.get('status'))
+            if is_active_status_word(status_value):
+                return 'working' if notification_time_is_fresh(notification) else 'ready'
+            if is_ready_status_word(status_value) or status_value or notification.get('paused'):
+                return 'ready'
+            return 'unknown' if notification_time_is_fresh(notification) else 'ready'
     return artifact_status(path, 'OpenCode')
 
 def has_tool_ancestor(pid):

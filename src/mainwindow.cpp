@@ -72,6 +72,7 @@
 #include <QFutureWatcher>
 #include <QPlainTextEdit>
 #include <QPalette>
+#include <QFileSystemWatcher>
 #ifdef Q_OS_MAC
 #include <mach/mach.h>
 #endif
@@ -133,6 +134,34 @@ QStringList monitorToolOrder()
 QString monitorToolTitle(const QString& toolName)
 {
     return toolName;
+}
+
+QString scaledIconCacheKey(const QString& path, int width, int height)
+{
+    return QStringLiteral("%1|%2x%3").arg(path).arg(width).arg(height);
+}
+
+QPixmap cachedScaledPixmap(const QString& path, int width, int height)
+{
+    if (path.isEmpty() || width <= 0 || height <= 0) {
+        return QPixmap();
+    }
+
+    static QHash<QString, QPixmap> cache;
+    const QString cacheKey = scaledIconCacheKey(path, width, height);
+    const auto it = cache.constFind(cacheKey);
+    if (it != cache.cend()) {
+        return it.value();
+    }
+
+    QPixmap source(path);
+    if (source.isNull()) {
+        return QPixmap();
+    }
+
+    const QPixmap scaled = source.scaled(width, height, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    cache.insert(cacheKey, scaled);
+    return scaled;
 }
 
 QString shellQuote(const QString& value)
@@ -332,12 +361,12 @@ QString monitorTooltipStyle()
     if (ThemeManager::instance()->currentTheme() == ThemeManager::Dark) {
         return QStringLiteral(
             "QToolTip { color: #ffffff; background: #111827; border: 1px solid #1f2937; "
-            "padding: 6px 8px; font-size: 13px; font-weight: 600; }");
+            "padding: 6px 8px; font-size: 14px; font-weight: 600; }");
     }
 
     return QStringLiteral(
         "QToolTip { color: #111827; background: #f9fafb; border: 1px solid #d1d5db; "
-        "padding: 6px 8px; font-size: 13px; font-weight: 600; }");
+        "padding: 6px 8px; font-size: 14px; font-weight: 600; }");
 }
 
 void applyMonitorTooltipPalette()
@@ -392,9 +421,9 @@ protected:
                 const QRect iconRect(columnRect.left() + 8, rect.center().y() - 9, 18, 18);
                 const QRect textRect(columnRect.left() + 32, rect.top(), columnRect.width() - 40, rect.height());
                 if (!iconPath.isEmpty()) {
-                    QPixmap icon(iconPath);
+                    const QPixmap icon = cachedScaledPixmap(iconPath, 18, 18);
                     if (!icon.isNull()) {
-                        painter->drawPixmap(iconRect, icon.scaled(18, 18, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                        painter->drawPixmap(iconRect, icon);
                     }
                 }
 
@@ -502,15 +531,15 @@ public:
     explicit MonitorToolGridDelegate(QObject *parent = nullptr)
         : QStyledItemDelegate(parent)
         , m_animationOffset(0)
+        , m_animationTimer(nullptr)
     {
         if (auto *tree = qobject_cast<QTreeWidget*>(parent)) {
-            auto *timer = new QTimer(this);
-            timer->setInterval(120);
-            connect(timer, &QTimer::timeout, this, [this, tree]() {
+            m_animationTimer = new QTimer(this);
+            m_animationTimer->setInterval(160);
+            connect(m_animationTimer, &QTimer::timeout, this, [this, tree]() {
                 m_animationOffset = (m_animationOffset + 3) % 24;
                 tree->viewport()->update();
             });
-            timer->start();
         }
     }
 
@@ -530,6 +559,24 @@ public:
 
     void paint(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override
     {
+        if (index.column() == 1 && m_animationTimer) {
+            const QVariantList cells = index.sibling(index.row(), 0).data(kMonitorGridCellsRole).toList();
+            bool hasWorking = false;
+            for (const QVariant& item : cells) {
+                if (static_cast<SessionStatus>(item.toMap().value(QStringLiteral("status")).toInt()) == SessionStatus::Working) {
+                    hasWorking = true;
+                    break;
+                }
+            }
+            if (hasWorking) {
+                if (!m_animationTimer->isActive()) {
+                    m_animationTimer->start();
+                }
+            } else if (m_animationTimer->isActive()) {
+                m_animationTimer->stop();
+            }
+        }
+
         if (index.column() == 1) {
             paintToolGrid(painter, option, index);
             return;
@@ -589,19 +636,17 @@ private:
                 const MonitorToolCell cell = cellBySlot.value(slotKey);
                 const QRect terminalRect = monitorGridTerminalIconRect(cellRect);
                 if (!cell.terminalIconPath.isEmpty()) {
-                    QPixmap terminalPix(cell.terminalIconPath);
+                    const QPixmap terminalPix = cachedScaledPixmap(cell.terminalIconPath, 14, 14);
                     if (!terminalPix.isNull()) {
-                        painter->drawPixmap(terminalRect,
-                                            terminalPix.scaled(24, 24, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                        painter->drawPixmap(terminalRect, terminalPix);
                     }
                 }
 
                 const QRect toolIconRect(terminalRect.right() + 8, cellRect.center().y() - 9, 18, 18);
                 if (!cell.toolIconPath.isEmpty()) {
-                    QPixmap toolPix(cell.toolIconPath);
+                    const QPixmap toolPix = cachedScaledPixmap(cell.toolIconPath, 18, 18);
                     if (!toolPix.isNull()) {
-                        painter->drawPixmap(toolIconRect,
-                                            toolPix.scaled(18, 18, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                        painter->drawPixmap(toolIconRect, toolPix);
                     }
                 }
 
@@ -711,6 +756,7 @@ private:
     }
 
     int m_animationOffset;
+    QTimer *m_animationTimer;
 };
 
 class MonitorTreeDelegate final : public QStyledItemDelegate
@@ -768,19 +814,26 @@ MainWindow::MainWindow(QWidget *parent)
      , m_aiToolsTree(nullptr)
 , m_swimlaneTabIndex(-1)
       , m_swimlaneView(nullptr)
-      , m_cachedSwimlaneWidget(nullptr)
       , m_swimlaneRefreshTimer(nullptr)
-      , m_swimlaneScanWatcher(nullptr)
-      , m_swimlaneRefreshing(false)
+     , m_swimlaneScanWatcher(nullptr)
+     , m_swimlaneRefreshing(false)
       , m_loadingProgressTimer(nullptr)
       , m_loadingProgressLabel(nullptr)
-      , m_loadingProgressStep(0)
+     , m_loadingProgressStep(0)
+      , m_currentPreviewPath()
+      , m_previewProjectCache()
+      , m_localPreviewStatsWatcher(nullptr)
+      , m_previewProjectCacheWatcher(nullptr)
+      , m_remoteDirectoryPreviewWatcher(nullptr)
       , m_monitorTabIndex(-1)
       , m_monitorView(nullptr)
-      , m_cachedMonitorWidget(nullptr)
       , m_monitorRefreshTimer(nullptr)
+      , m_monitorArtifactDebounceTimer(nullptr)
+      , m_monitorArtifactWatcher(nullptr)
       , m_monitorScanWatcher(nullptr)
       , m_monitorRefreshing(false)
+      , m_monitorLocalStatusRefreshPending(false)
+      , m_monitorArtifactWatchPaths()
       , m_monitorProgressLabel(nullptr)
       , m_monitorProgressStep(0)
       , m_memoryUsageTimer(nullptr)
@@ -1075,22 +1128,37 @@ void MainWindow::updateMemoryUsageLabel()
     }
 
     double rssMb = 0.0;
+    double footprintMb = 0.0;
 #ifdef Q_OS_MAC
     mach_task_basic_info_data_t info;
     mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
     if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count) == KERN_SUCCESS) {
         rssMb = static_cast<double>(info.resident_size) / (1024.0 * 1024.0);
     }
+
+    task_vm_info_data_t vmInfo;
+    mach_msg_type_number_t vmCount = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&vmInfo), &vmCount) == KERN_SUCCESS) {
+        footprintMb = static_cast<double>(vmInfo.phys_footprint) / (1024.0 * 1024.0);
+    }
 #endif
 
-    if (rssMb <= 0.0) {
+    const double primaryMemoryMb = footprintMb > 0.0 ? footprintMb : rssMb;
+    if (primaryMemoryMb <= 0.0) {
         m_memoryUsageLabel->setText(tr("Memory --"));
-        m_memoryUsageLabel->setToolTip(tr("Current app RSS memory"));
+        m_memoryUsageLabel->setToolTip(tr("Current app memory footprint"));
         return;
     }
 
-    m_memoryUsageLabel->setText(tr("Memory %1M").arg(QString::number(rssMb, 'f', rssMb >= 100.0 ? 0 : 1)));
-    m_memoryUsageLabel->setToolTip(tr("Current app RSS memory"));
+    m_memoryUsageLabel->setText(tr("Memory %1M").arg(QString::number(primaryMemoryMb, 'f', primaryMemoryMb >= 100.0 ? 0 : 1)));
+    if (rssMb > 0.0 && footprintMb > 0.0) {
+        m_memoryUsageLabel->setToolTip(
+            tr("Current app memory footprint: %1M\nResident set size (RSS): %2M")
+                .arg(QString::number(footprintMb, 'f', footprintMb >= 100.0 ? 0 : 1),
+                     QString::number(rssMb, 'f', rssMb >= 100.0 ? 0 : 1)));
+    } else {
+        m_memoryUsageLabel->setToolTip(tr("Current app memory footprint"));
+    }
 }
 
 QIcon MainWindow::createSwimlaneIcon(const QColor &baseColor) const
@@ -1250,20 +1318,6 @@ void MainWindow::setupCentralWidget()
     mainLayout->setContentsMargins(16, 16, 16, 16);
     mainLayout->setSpacing(8);
 
-    // Create main tab widget for top-level navigation
-    QTabWidget *mainTabWidget = new QTabWidget;
-    mainTabWidget->setObjectName("mainTabs");
-    mainTabWidget->setTabsClosable(true);
-    mainTabWidget->setStyleSheet(
-        "QTabWidget#mainTabs { background: white; }"
-        "QTabWidget#mainTabs::pane { border: 1px solid #e0e0e0; border-radius: 4px; background: white; }"
-        "QTabWidget#mainTabs::tab-bar { alignment: left; }"
-        "QTabBar::tab { padding: 8px 20px; margin-right: 4px; border: 1px solid #e0e0e0; border-bottom: none; border-radius: 4px 4px 0 0; background: #f5f5f7; }"
-        "QTabWidget#mainTabs QTabBar::tab:selected { background: white; color: #007aff; border-bottom: 1px solid white; }"
-        "QTabWidget#mainTabs QTabBar::tab:!selected { background: #e8e8ed; color: #86868b; }"
-        "QTabBar::close-button { subcontrol-position: right; margin: 4px; }"
-    );
-    
     // HOME tab content: splitter with vault list and preview
     QWidget *homeTabContent = new QWidget;
     QVBoxLayout *homeTabLayout = new QVBoxLayout(homeTabContent);
@@ -1300,12 +1354,6 @@ void MainWindow::setupCentralWidget()
     m_vaultList->setDefaultDropAction(Qt::MoveAction);
     m_vaultList->setDragDropMode(QAbstractItemView::InternalMove);
     m_vaultList->setStyleSheet("QListWidget::item { min-height: 30px; padding: 5px 10px; border-radius: 3px; } QListWidget::item:selected { background: #007aff; color: white; }");
-
-    QGraphicsDropShadowEffect *listShadow = new QGraphicsDropShadowEffect;
-    listShadow->setBlurRadius(20);
-    listShadow->setColor(QColor(0, 0, 0, 30));
-    listShadow->setOffset(0, 4);
-    m_vaultList->setGraphicsEffect(listShadow);
 
     leftLayout->addWidget(m_vaultList, 1);
 
@@ -1387,126 +1435,26 @@ void MainWindow::setupCentralWidget()
     m_overviewEmptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 24px; }");
     overviewLayout->addWidget(m_overviewEmptyLabel, 1);
 
-    m_overviewContent = new QWidget;
-    QVBoxLayout *overviewContentLayout = new QVBoxLayout(m_overviewContent);
-    overviewContentLayout->setContentsMargins(0, 0, 0, 0);
-    overviewContentLayout->setSpacing(8);
-
-    m_overviewPathLabel = new QLabel;
-    m_overviewPathLabel->setWordWrap(true);
-    m_overviewPathLabel->setStyleSheet("QLabel { color: #ff3b30; font-size: 16px; background: transparent; }");
-    overviewContentLayout->addWidget(m_overviewPathLabel);
-
-    m_vaultStatsCard = new QFrame;
-    m_vaultStatsCard->setStyleSheet("QFrame { background: transparent; border: none; }");
-    QVBoxLayout *vaultCardLayout = new QVBoxLayout(m_vaultStatsCard);
-    vaultCardLayout->setContentsMargins(0, 0, 0, 0);
-    vaultCardLayout->setSpacing(0);
-    m_vaultStatsHeader = new QLabel(tr("Vault Statistics"));
-    m_vaultStatsHeader->setStyleSheet("QLabel { background: #f5f5f7; color: #1d1d1f; font-size: 15px; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e0e0e0; }");
-    vaultCardLayout->addWidget(m_vaultStatsHeader);
-    m_vaultStatsBody = new QWidget;
-    m_vaultStatsBody->setStyleSheet("QWidget { background: transparent; }");
-    m_vaultStatsGrid = new QGridLayout(m_vaultStatsBody);
-    m_vaultStatsGrid->setContentsMargins(0, 0, 0, 0);
-    m_vaultStatsGrid->setHorizontalSpacing(0);
-    m_vaultStatsGrid->setVerticalSpacing(0);
-    m_vaultStatsGrid->setColumnStretch(0, 1);
-    m_vaultStatsGrid->setColumnStretch(1, 1);
-    vaultCardLayout->addWidget(m_vaultStatsBody);
-    overviewContentLayout->addWidget(m_vaultStatsCard);
-
-    m_r2moStatsCard = new QFrame;
-    m_r2moStatsCard->setStyleSheet("QFrame { background: transparent; border: none; }");
-    QVBoxLayout *r2moCardLayout = new QVBoxLayout(m_r2moStatsCard);
-    r2moCardLayout->setContentsMargins(0, 0, 0, 0);
-    r2moCardLayout->setSpacing(0);
-    m_r2moStatsHeader = new QLabel(tr("R2MO Statistics"));
-    m_r2moStatsHeader->setStyleSheet("QLabel { background: #f5f5f7; color: #1d1d1f; font-size: 15px; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e0e0e0; }");
-    r2moCardLayout->addWidget(m_r2moStatsHeader);
-    m_r2moStatsBody = new QWidget;
-    m_r2moStatsBody->setStyleSheet("QWidget { background: transparent; }");
-    m_r2moStatsGrid = new QGridLayout(m_r2moStatsBody);
-    m_r2moStatsGrid->setContentsMargins(0, 0, 0, 0);
-    m_r2moStatsGrid->setHorizontalSpacing(0);
-    m_r2moStatsGrid->setVerticalSpacing(0);
-    m_r2moStatsGrid->setColumnStretch(0, 1);
-    m_r2moStatsGrid->setColumnStretch(1, 1);
-    r2moCardLayout->addWidget(m_r2moStatsBody);
-    overviewContentLayout->addWidget(m_r2moStatsCard);
-
-    overviewContentLayout->addStretch(1);
-    overviewLayout->addWidget(m_overviewContent, 1);
     setOverviewEmptyState(true);
     m_tabWidget->addTab(m_overviewTab, tr("Overview"));
     m_tabWidget->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);
     
-    // Tab 2: Project Tasks (项目任务)
     m_tasksTab = new QWidget;
     QVBoxLayout *tasksLayout = new QVBoxLayout(m_tasksTab);
     tasksLayout->setContentsMargins(0, 0, 0, 0);
     tasksLayout->setSpacing(0);
-    
-    m_taskTree = new QTreeWidget;
-    m_taskTree->setHeaderLabel(tr("Tasks"));
-    m_taskTree->setIndentation(22);
-    m_taskTree->setUniformRowHeights(false);
-    m_taskTree->setStyleSheet("QTreeWidget { border: none; background: white; } QTreeWidget::item { padding: 6px 4px; } QTreeWidget::item:selected { background: #007aff; color: white; }");
-    m_taskTree->setAlternatingRowColors(false);
-    m_taskTree->setRootIsDecorated(true);  // Show guide lines
-    m_taskTree->setItemsExpandable(true);   // Allow expand/collapse
-    m_taskTree->setAnimated(true);          // Animate expand/collapse
-    
-    tasksLayout->addWidget(m_taskTree, 1);
     m_tabWidget->addTab(m_tasksTab, tr("Project Tasks"));
-    
-    // Tab 3: Structure Graph (结构图) - fill entire page
+
     m_graphTab = new QWidget;
     QVBoxLayout *graphLayout = new QVBoxLayout(m_graphTab);
     graphLayout->setContentsMargins(0, 0, 0, 0);
     graphLayout->setSpacing(0);
-    
-    m_graphScene = new QGraphicsScene(this);
-    m_graphView = new QGraphicsView(m_graphScene);
-    m_graphView->setRenderHint(QPainter::Antialiasing);
-    m_graphView->setStyleSheet("QGraphicsView { border: none; background: white; }");
-    m_graphView->setDragMode(QGraphicsView::ScrollHandDrag);
-    m_graphView->setRenderHint(QPainter::SmoothPixmapTransform);
-    m_graphView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
-    m_graphView->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-    m_graphView->setResizeAnchor(QGraphicsView::AnchorUnderMouse);
-    m_graphView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_graphView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_graphView->setBackgroundBrush(QBrush(QColor("#fafafa")));
-    m_graphView->installEventFilter(this);  // Install event filter for zoom/pan
-    
-    graphLayout->addWidget(m_graphView, 1);
     m_tabWidget->addTab(m_graphTab, tr("Structure Graph"));
-    
-    // Tab 4: AI Tools (AI工具)
+
     m_aiToolsTab = new QWidget;
     QVBoxLayout *aiToolsLayout = new QVBoxLayout(m_aiToolsTab);
     aiToolsLayout->setContentsMargins(0, 0, 0, 0);
     aiToolsLayout->setSpacing(0);
-    
-    m_aiToolsEmptyLabel = new QLabel(tr("Select a vault with AI tool configurations..."));
-    m_aiToolsEmptyLabel->setAlignment(Qt::AlignCenter);
-    m_aiToolsEmptyLabel->setWordWrap(true);
-    m_aiToolsEmptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 24px; }");
-    aiToolsLayout->addWidget(m_aiToolsEmptyLabel, 1);
-    
-    m_aiToolsTree = new QTreeWidget;
-    m_aiToolsTree->setHeaderLabel(tr("AI Tools"));
-    m_aiToolsTree->setIndentation(22);
-    m_aiToolsTree->setUniformRowHeights(false);
-    m_aiToolsTree->setStyleSheet("QTreeWidget { border: none; background: white; } QTreeWidget::item { padding: 6px 4px; } QTreeWidget::item:selected { background: #007aff; color: white; }");
-    m_aiToolsTree->setAlternatingRowColors(false);
-    m_aiToolsTree->setRootIsDecorated(true);
-    m_aiToolsTree->setItemsExpandable(true);
-    m_aiToolsTree->setAnimated(true);
-    m_aiToolsTree->setVisible(false);
-    aiToolsLayout->addWidget(m_aiToolsTree, 1);
-    
     m_tabWidget->addTab(m_aiToolsTab, tr("AI Tools"));
 
     rightLayout->addWidget(m_tabWidget, 1);
@@ -1553,8 +1501,10 @@ void MainWindow::setupCentralWidget()
         if (m_monitorRefreshTimer) {
             if (monitorVisible) {
                 m_monitorRefreshTimer->start();
+                setMonitorArtifactWatchEnabled(true);
             } else {
                 m_monitorRefreshTimer->stop();
+                setMonitorArtifactWatchEnabled(false);
             }
         }
     });
@@ -1581,123 +1531,289 @@ void MainWindow::setupConnections()
     connect(m_previewTitleEdit, &QLineEdit::editingFinished, this, &MainWindow::onPreviewTitleEditFinished);
     connect(m_previewTitleEdit, &QLineEdit::returnPressed, this, &MainWindow::onPreviewTitleReturnPressed);
     connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::ensurePreviewTabContent);
-    connect(m_taskTree, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onTaskItemDoubleClicked);
-    connect(m_aiToolsTree, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onAIToolItemDoubleClicked);
-    connect(m_vaultModel, &VaultModel::modelChanged, this, &MainWindow::updateVaultList);
+    connect(m_vaultModel, &VaultModel::modelChanged, this, [this]() {
+        m_projectPathCache = TimedProjectPathCache{};
+        updateVaultList();
+    });
     connect(TranslationManager::instance(), &TranslationManager::languageChanged, 
             this, &MainWindow::onLanguageChanged);
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &MainWindow::onThemeChanged);
-    // Swimlane refresh timer (10 seconds)
-    m_swimlaneRefreshTimer = new QTimer(this);
-    m_swimlaneRefreshTimer->setInterval(10000);
-    connect(m_swimlaneRefreshTimer, &QTimer::timeout, this, &MainWindow::onSwimlaneRefresh);
-    m_swimlaneRefreshTimer->stop();
-    
-    // Loading progress animation timer
-    m_loadingProgressTimer = new QTimer(this);
-    m_loadingProgressTimer->setInterval(300);
-    connect(m_loadingProgressTimer, &QTimer::timeout, this, [this]() {
-        if (m_loadingProgressLabel) {
-            m_loadingProgressStep = (m_loadingProgressStep + 1) % 4;
-            QString dots = QString(".").repeated(m_loadingProgressStep + 1);
-            static const QStringList steps = {
-                QT_TR_NOOP("Scanning Git repositories"),
-                QT_TR_NOOP("Scanning AI tools"),
-                QT_TR_NOOP("Loading task queues"),
-                QT_TR_NOOP("Building swimlane view")
-            };
-            QString stepText = tr(steps[m_loadingProgressStep % steps.size()].toUtf8().constData());
-            m_loadingProgressLabel->setText(QString("%1%2").arg(stepText, dots));
-        }
-    });
-    
-    // Monitor refresh timer (10 seconds)
-    m_monitorRefreshTimer = new QTimer(this);
-    m_monitorRefreshTimer->setInterval(10000);
-    connect(m_monitorRefreshTimer, &QTimer::timeout, this, &MainWindow::onMonitorRefresh);
-    m_monitorRefreshTimer->stop();
-
     m_memoryUsageTimer = new QTimer(this);
     m_memoryUsageTimer->setInterval(1500);
     connect(m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsageLabel);
     m_memoryUsageTimer->start();
     updateMemoryUsageLabel();
 
-    m_remoteConnectivityTimer = new QTimer(this);
-    m_remoteConnectivityTimer->setInterval(30 * 1000);
-    connect(m_remoteConnectivityTimer, &QTimer::timeout, this, [this]() {
-        refreshRemoteConnectivityStatuses(false);
+    QTimer::singleShot(0, this, [this]() {
+        ensureRemoteConnectivityInfrastructureInitialized();
+        refreshRemoteConnectivityStatuses(true);
     });
-    m_remoteConnectivityTimer->start();
-    
-    // Monitor scan watcher for async refresh
-    m_monitorScanWatcher = new QFutureWatcher<QList<ProjectMonitorData>>(this);
-    connect(m_monitorScanWatcher, &QFutureWatcher<QList<ProjectMonitorData>>::finished, this, [this]() {
-        if (m_monitorRefreshing) {
-            QList<ProjectMonitorData> data = m_monitorScanWatcher->result();
-            if (!updateMonitorStatusCells(data)) {
-                QWidget *newWidget = buildMonitorView(data);
-                replaceMonitorContent(newWidget, true);
+}
+
+void MainWindow::ensureSwimlaneInfrastructureInitialized()
+{
+    if (!m_swimlaneRefreshTimer) {
+        m_swimlaneRefreshTimer = new QTimer(this);
+        m_swimlaneRefreshTimer->setInterval(10000);
+        connect(m_swimlaneRefreshTimer, &QTimer::timeout, this, &MainWindow::onSwimlaneRefresh);
+        m_swimlaneRefreshTimer->stop();
+    }
+
+    if (!m_loadingProgressTimer) {
+        m_loadingProgressTimer = new QTimer(this);
+        m_loadingProgressTimer->setInterval(300);
+        connect(m_loadingProgressTimer, &QTimer::timeout, this, [this]() {
+            if (m_loadingProgressLabel) {
+                m_loadingProgressStep = (m_loadingProgressStep + 1) % 4;
+                QString dots = QString(".").repeated(m_loadingProgressStep + 1);
+                static const QStringList steps = {
+                    QT_TR_NOOP("Scanning Git repositories"),
+                    QT_TR_NOOP("Scanning AI tools"),
+                    QT_TR_NOOP("Loading task queues"),
+                    QT_TR_NOOP("Building swimlane view")
+                };
+                QString stepText = tr(steps[m_loadingProgressStep % steps.size()].toUtf8().constData());
+                m_loadingProgressLabel->setText(QString("%1%2").arg(stepText, dots));
             }
-            setMonitorRefreshEnabled(true);
-            setMonitorRowsLoading(false);
-            m_monitorRefreshing = false;
-        }
-    });
+        });
+    }
 
-    m_specialMonitorScanWatcher = new QFutureWatcher<QList<SpecialMonitorSnapshot>>(this);
-    connect(m_specialMonitorScanWatcher, &QFutureWatcher<QList<SpecialMonitorSnapshot>>::finished, this, [this]() {
-        if (m_specialMonitorRefreshing) {
-            m_specialMonitorDataCache.data = m_specialMonitorScanWatcher->result();
-            m_specialMonitorDataCache.capturedAt = QDateTime::currentDateTime();
-            updateSpecialMonitorTable(m_specialMonitorDataCache.data);
-            setSpecialMonitorActionsEnabled(true);
-            setSpecialMonitorRowsLoading(false);
-            m_specialMonitorRefreshing = false;
-        }
-    });
+    if (!m_swimlaneScanWatcher) {
+        m_swimlaneScanWatcher = new QFutureWatcher<SwimlaneScanData>(this);
+        connect(m_swimlaneScanWatcher, &QFutureWatcher<SwimlaneScanData>::finished, this, [this]() {
+            if (!m_swimlaneRefreshing) {
+                return;
+            }
 
-    m_specialMonitorRefreshTimer = new QTimer(this);
-    m_specialMonitorRefreshTimer->setInterval(5 * 60 * 1000);
-    connect(m_specialMonitorRefreshTimer, &QTimer::timeout, this, [this]() {
-        refreshSpecialMonitorAsync(false);
-    });
-    m_specialMonitorRefreshTimer->stop();
-
-    refreshRemoteConnectivityStatuses(true);
-    
-    // Swimlane scan watcher for async refresh
-    m_swimlaneScanWatcher = new QFutureWatcher<SwimlaneScanData>(this);
-    connect(m_swimlaneScanWatcher, &QFutureWatcher<SwimlaneScanData>::finished, this, [this]() {
-        if (m_swimlaneRefreshing) {
-            m_loadingProgressTimer->stop();
+            if (m_loadingProgressTimer) {
+                m_loadingProgressTimer->stop();
+            }
             m_loadingProgressStep = 0;
-            
+
             SwimlaneScanData data = m_swimlaneScanWatcher->result();
             QWidget *newWidget = buildSwimlaneView(data);
-            
-            if (m_cachedSwimlaneWidget && m_cachedSwimlaneWidget != m_swimlaneTabContent && m_cachedSwimlaneWidget != newWidget) {
-                m_cachedSwimlaneWidget->deleteLater();
-            }
-            m_cachedSwimlaneWidget = newWidget;
-            
-            // Update visible tab if showing swimlane
+
             if (m_swimlaneTabContent && m_mainTabWidget->indexOf(m_swimlaneTabContent) >= 0) {
-                int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
-                
-                // If swimlane tab is currently visible, update it
+                const int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
                 if (m_mainTabWidget->currentIndex() == idx) {
                     m_mainTabWidget->removeTab(idx);
                     m_swimlaneTabContent = newWidget;
-                    int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
+                    const int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
                     addSwimlaneCloseButton(newIdx);
                     m_mainTabWidget->setCurrentIndex(newIdx);
                 }
             }
             m_swimlaneRefreshing = false;
-        }
-    });
+        });
+    }
+}
+
+void MainWindow::ensurePreviewAsyncInfrastructureInitialized()
+{
+    if (!m_localPreviewStatsWatcher) {
+        m_localPreviewStatsWatcher = new QFutureWatcher<LocalPreviewStats>(this);
+        connect(m_localPreviewStatsWatcher, &QFutureWatcher<LocalPreviewStats>::finished, this, [this]() {
+            if (!m_localPreviewStatsWatcher) {
+                return;
+            }
+
+            const LocalPreviewStats stats = m_localPreviewStatsWatcher->result();
+            if (stats.vaultPath != m_currentPreviewPath) {
+                return;
+            }
+
+            applyLocalPreviewStats(stats);
+        });
+    }
+
+    if (!m_previewProjectCacheWatcher) {
+        m_previewProjectCacheWatcher = new QFutureWatcher<PreviewProjectCache>(this);
+        connect(m_previewProjectCacheWatcher, &QFutureWatcher<PreviewProjectCache>::finished, this, [this]() {
+            if (!m_previewProjectCacheWatcher) {
+                return;
+            }
+
+            const PreviewProjectCache cache = m_previewProjectCacheWatcher->result();
+            if (cache.vaultPath != m_currentPreviewPath) {
+                return;
+            }
+
+            if (cache.vaultPath != m_previewProjectCache.vaultPath) {
+                m_previewProjectCache = cache;
+            } else {
+                m_previewProjectCache.vaultPath = cache.vaultPath;
+                m_previewProjectCache.hasR2moConfig = cache.hasR2moConfig;
+                m_previewProjectCache.loaded = cache.loaded;
+                m_previewProjectCache.projectCount = cache.projectCount;
+                m_previewProjectCache.totalQueue = cache.totalQueue;
+                m_previewProjectCache.totalHistorical = cache.totalHistorical;
+                if (cache.projectsLoaded) {
+                    m_previewProjectCache.projects = cache.projects;
+                    m_previewProjectCache.projectsLoaded = true;
+                }
+            }
+            ensureOverviewInitialized();
+            clearOverviewGrid(m_r2moStatsGrid);
+            if (cache.hasR2moConfig && cache.projectCount > 0) {
+                int r2moRow = 0;
+                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Configuration"), tr("✓ Detected"), "#007aff");
+                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Total Projects"), QString::number(cache.projectCount));
+                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Task Queue"), QString("%1 %2").arg(cache.totalQueue).arg(tr("pending")), "#ff9500");
+                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Historical Tasks"), QString("%1 %2").arg(cache.totalHistorical).arg(tr("completed")), "#34c759");
+                m_r2moStatsCard->setVisible(true);
+                ensurePreviewTabContent(m_tabWidget->currentIndex());
+                return;
+            }
+
+            m_r2moStatsCard->setVisible(false);
+        });
+    }
+
+    if (!m_remoteDirectoryPreviewWatcher) {
+        m_remoteDirectoryPreviewWatcher = new QFutureWatcher<RemoteDirectoryFetchResult>(this);
+        connect(m_remoteDirectoryPreviewWatcher, &QFutureWatcher<RemoteDirectoryFetchResult>::finished, this, [this]() {
+            if (!m_remoteDirectoryPreviewWatcher) {
+                return;
+            }
+
+            const RemoteDirectoryFetchResult result = m_remoteDirectoryPreviewWatcher->result();
+            if (result.vaultPath != m_currentPreviewPath) {
+                return;
+            }
+
+            ensureOverviewInitialized();
+            clearOverviewGrid(m_r2moStatsGrid);
+            const Vault currentVault = vaultByPath(result.vaultPath);
+            const QString checkedText = currentVault.lastConnectionCheck.isValid()
+                ? currentVault.lastConnectionCheck.toString("yyyy-MM-dd HH:mm:ss")
+                : tr("Never");
+            addOverviewRow(m_r2moStatsGrid, 0, tr("Last Checked"), checkedText);
+            addOverviewRow(m_r2moStatsGrid, 1, tr("Remote Child Directories"), QString::number(result.entries.size()));
+            if (!result.errorMessage.isEmpty()) {
+                addOverviewRow(m_r2moStatsGrid, 2, tr("Notice"), result.errorMessage, "#ff9500");
+            }
+        });
+    }
+}
+
+void MainWindow::applyLocalPreviewStats(const LocalPreviewStats& stats)
+{
+    if (stats.vaultPath != m_currentPreviewPath) {
+        return;
+    }
+
+    ensureOverviewInitialized();
+    clearOverviewGrid(m_vaultStatsGrid);
+
+    if (!stats.pathExists) {
+        addOverviewRow(m_vaultStatsGrid, 0, tr("Warning"), tr("Path does not exist"), "#ff3b30");
+        return;
+    }
+
+    int vaultRow = 0;
+    addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Files"), QString::number(stats.files));
+    addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Folders"), QString::number(stats.folders));
+    if (stats.hiddenItems > 0) {
+        addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Hidden Items"), QString::number(stats.hiddenItems), QString(), tr("(.obsidian, .r2mo)"));
+    }
+    if (stats.hasObsidianConfig) {
+        addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Obsidian"), tr("✓ Valid Vault"), "#34c759");
+    }
+}
+
+void MainWindow::ensureMonitorInfrastructureInitialized()
+{
+    if (!m_monitorRefreshTimer) {
+        m_monitorRefreshTimer = new QTimer(this);
+        m_monitorRefreshTimer->setInterval(10000);
+        connect(m_monitorRefreshTimer, &QTimer::timeout, this, &MainWindow::onMonitorRefresh);
+        m_monitorRefreshTimer->stop();
+    }
+
+    if (!m_monitorArtifactDebounceTimer) {
+        m_monitorArtifactDebounceTimer = new QTimer(this);
+        m_monitorArtifactDebounceTimer->setSingleShot(true);
+        m_monitorArtifactDebounceTimer->setInterval(700);
+        connect(m_monitorArtifactDebounceTimer, &QTimer::timeout, this, [this]() {
+            refreshMonitorLocalStatusAsync();
+        });
+    }
+
+    if (!m_monitorArtifactWatcher) {
+        m_monitorArtifactWatcher = new QFileSystemWatcher(this);
+        connect(m_monitorArtifactWatcher, &QFileSystemWatcher::directoryChanged, this, [this](const QString&) {
+            if (m_monitorArtifactDebounceTimer) {
+                m_monitorArtifactDebounceTimer->start();
+            }
+        });
+        connect(m_monitorArtifactWatcher, &QFileSystemWatcher::fileChanged, this, [this](const QString& path) {
+            if (m_monitorArtifactDebounceTimer) {
+                m_monitorArtifactDebounceTimer->start();
+            }
+            upsertMonitorArtifactWatchPath(path);
+        });
+    }
+
+    if (!m_monitorScanWatcher) {
+        m_monitorScanWatcher = new QFutureWatcher<MonitorRefreshResult>(this);
+        connect(m_monitorScanWatcher, &QFutureWatcher<MonitorRefreshResult>::finished, this, [this]() {
+            if (m_monitorRefreshing) {
+                const MonitorRefreshResult result = m_monitorScanWatcher->result();
+                applyMonitorRefreshResult(result);
+                setMonitorRefreshEnabled(true);
+                setMonitorRowsLoading(false);
+                m_monitorRefreshing = false;
+                if (!result.localOnly) {
+                    rebuildMonitorArtifactWatchers();
+                }
+                if (m_monitorLocalStatusRefreshPending && m_monitorArtifactDebounceTimer) {
+                    m_monitorArtifactDebounceTimer->start();
+                }
+            }
+        });
+    }
+}
+
+void MainWindow::ensureRemoteConnectivityInfrastructureInitialized()
+{
+    if (!m_remoteConnectivityTimer) {
+        m_remoteConnectivityTimer = new QTimer(this);
+        m_remoteConnectivityTimer->setInterval(30 * 1000);
+        connect(m_remoteConnectivityTimer, &QTimer::timeout, this, [this]() {
+            refreshRemoteConnectivityStatuses(false);
+        });
+    }
+
+    if (!m_remoteConnectivityTimer->isActive()) {
+        m_remoteConnectivityTimer->start();
+    }
+}
+
+void MainWindow::ensureSpecialMonitorInfrastructureInitialized()
+{
+    if (!m_specialMonitorScanWatcher) {
+        m_specialMonitorScanWatcher = new QFutureWatcher<QList<SpecialMonitorSnapshot>>(this);
+        connect(m_specialMonitorScanWatcher, &QFutureWatcher<QList<SpecialMonitorSnapshot>>::finished, this, [this]() {
+            if (m_specialMonitorRefreshing) {
+                m_specialMonitorDataCache.data = m_specialMonitorScanWatcher->result();
+                m_specialMonitorDataCache.capturedAt = QDateTime::currentDateTime();
+                updateSpecialMonitorTable(m_specialMonitorDataCache.data);
+                setSpecialMonitorActionsEnabled(true);
+                setSpecialMonitorRowsLoading(false);
+                m_specialMonitorRefreshing = false;
+            }
+        });
+    }
+
+    if (!m_specialMonitorRefreshTimer) {
+        m_specialMonitorRefreshTimer = new QTimer(this);
+        m_specialMonitorRefreshTimer->setInterval(5 * 60 * 1000);
+        connect(m_specialMonitorRefreshTimer, &QTimer::timeout, this, [this]() {
+            refreshSpecialMonitorAsync(false);
+        });
+        m_specialMonitorRefreshTimer->stop();
+    }
 }
 
 void MainWindow::updateVaultList()
@@ -1790,12 +1906,7 @@ void MainWindow::syncVaultOrderFromList()
 
 void MainWindow::invalidateMonitorView(bool refreshIfOpen)
 {
-    if (m_cachedMonitorWidget && m_cachedMonitorWidget != m_monitorTabContent) {
-        m_cachedMonitorWidget->deleteLater();
-    }
-
     if (!m_monitorTabContent) {
-        m_cachedMonitorWidget = nullptr;
         return;
     }
 
@@ -1803,8 +1914,6 @@ void MainWindow::invalidateMonitorView(bool refreshIfOpen)
         refreshMonitorAsync();
         return;
     }
-
-    m_cachedMonitorWidget = m_monitorTabContent;
 }
 
 void MainWindow::onAddVault()
@@ -2635,6 +2744,8 @@ void MainWindow::applyRemoteConnectivityResult(const QString& vaultPath, bool co
 
 void MainWindow::checkRemoteVaultConnectivityAsync(const QString& vaultPath)
 {
+    ensureRemoteConnectivityInfrastructureInitialized();
+
     const Vault vault = vaultByPath(vaultPath);
     if (!vault.isRemote()) {
         return;
@@ -2666,6 +2777,8 @@ void MainWindow::checkRemoteVaultConnectivityAsync(const QString& vaultPath)
 
 void MainWindow::refreshRemoteConnectivityStatuses(bool force)
 {
+    ensureRemoteConnectivityInfrastructureInitialized();
+
     const QList<Vault> remotes = remoteVaults();
     const QDateTime now = QDateTime::currentDateTime();
     for (const Vault& vault : remotes) {
@@ -2907,6 +3020,8 @@ void MainWindow::onSettings()
 
 void MainWindow::refreshSpecialMonitorAsync(bool force)
 {
+    ensureSpecialMonitorInfrastructureInitialized();
+
     if (m_specialMonitorRefreshing) {
         return;
     }
@@ -3472,6 +3587,7 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
 
         clearPreviewTabContent();
         setOverviewEmptyState(false);
+        ensureOverviewInitialized();
         m_overviewEmptyLabel->setText(tr("Select a vault to view details..."));
         m_overviewPathLabel->setText(currentVault.path);
         clearOverviewGrid(m_vaultStatsGrid);
@@ -3490,12 +3606,8 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
         addOverviewRow(m_r2moStatsGrid, 0, tr("Last Checked"), checkedText);
 
         if (currentVault.connectionStatus == VaultConnectionStatus::Connected) {
-            QString errorMessage;
-            const QList<RemoteDirectoryEntry> childDirectories = fetchRemoteDirectories(currentVault, currentVault.remotePath, &errorMessage);
-            addOverviewRow(m_r2moStatsGrid, 1, tr("Remote Child Directories"), QString::number(childDirectories.size()));
-            if (!errorMessage.isEmpty()) {
-                addOverviewRow(m_r2moStatsGrid, 2, tr("Notice"), errorMessage, "#ff9500");
-            }
+            addOverviewRow(m_r2moStatsGrid, 1, tr("Remote Child Directories"), tr("Loading..."), "#86868b");
+            requestRemoteDirectoryPreview(currentVault);
         } else {
             addOverviewRow(m_r2moStatsGrid, 1, tr("Notice"),
                            currentVault.lastConnectionError.isEmpty()
@@ -3534,76 +3646,52 @@ void MainWindow::updatePreviewPane(const QString& name, const QString& path)
     }
 
     setOverviewEmptyState(false);
+    ensureOverviewInitialized();
     m_overviewEmptyLabel->setText(tr("Select a vault to view details..."));
     m_overviewPathLabel->setText(path);
     clearOverviewGrid(m_vaultStatsGrid);
     clearOverviewGrid(m_r2moStatsGrid);
+    addOverviewRow(m_vaultStatsGrid, 0, tr("Files"), tr("Loading..."), "#86868b");
+    addOverviewRow(m_vaultStatsGrid, 1, tr("Folders"), tr("Loading..."), "#86868b");
 
-    QDir vaultDir(path);
-    if (vaultDir.exists()) {
-        // Show hidden files in count (including .obsidian, .r2mo, etc.)
+    m_previewProjectCache = PreviewProjectCache{};
+    addOverviewRow(m_r2moStatsGrid, 0, tr("Configuration"), tr("Loading..."), "#86868b");
+    m_r2moStatsCard->setVisible(true);
+
+    ensurePreviewAsyncInfrastructureInitialized();
+
+    QFuture<LocalPreviewStats> localStatsFuture = QtConcurrent::run([this, path]() {
+        LocalPreviewStats stats;
+        stats.vaultPath = path;
+
+        QDir vaultDir(path);
+        stats.pathExists = vaultDir.exists();
+        if (!stats.pathExists) {
+            return stats;
+        }
+
         vaultDir.setFilter(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
-        QStringList allEntries = vaultDir.entryList();
-        
-        int files = 0;
-        int folders = 0;
-        int hiddenItems = 0;
-        
+        const QStringList allEntries = vaultDir.entryList();
         for (const QString& entry : allEntries) {
-            QFileInfo fi(path + "/" + entry);
+            const QFileInfo fi(path + "/" + entry);
             if (fi.isHidden()) {
-                hiddenItems++;
+                ++stats.hiddenItems;
             }
             if (fi.isFile()) {
-                files++;
+                ++stats.files;
             } else if (fi.isDir()) {
-                folders++;
+                ++stats.folders;
             }
         }
 
-        int vaultRow = 0;
-        addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Files"), QString::number(files));
-        addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Folders"), QString::number(folders));
-        if (hiddenItems > 0) {
-            addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Hidden Items"), QString::number(hiddenItems), QString(), tr("(.obsidian, .r2mo)"));
-        }
-        if (m_vaultValidator->hasObsidianConfig(path)) {
-            addOverviewRow(m_vaultStatsGrid, vaultRow++, tr("Obsidian"), tr("✓ Valid Vault"), "#34c759");
-        }
-        
-        m_previewProjectCache = loadPreviewProjectCache(path);
-
-        // Check for .r2mo folder and show detailed info
-        if (m_previewProjectCache.hasR2moConfig && !m_previewProjectCache.projects.isEmpty()) {
-            const QList<R2moSubProject>& projects = m_previewProjectCache.projects;
-                // Calculate totals
-                int totalQueue = 0;
-                int totalHistorical = 0;
-                
-                for (const R2moSubProject& proj : projects) {
-                    totalQueue += proj.taskQueueCount;
-                    totalHistorical += proj.historicalTaskCount;
-                }
-                
-                int r2moRow = 0;
-                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Configuration"), tr("✓ Detected"), "#007aff");
-                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Total Projects"), QString::number(projects.size()));
-                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Task Queue"), QString("%1 %2").arg(totalQueue).arg(tr("pending")), "#ff9500");
-                addOverviewRow(m_r2moStatsGrid, r2moRow++, tr("Historical Tasks"), QString("%1 %2").arg(totalHistorical).arg(tr("completed")), "#34c759");
-            m_r2moStatsCard->setVisible(true);
-        } else {
-            m_r2moStatsCard->setVisible(false);
-        }
-
-        ensurePreviewTabContent(m_tabWidget->currentIndex());
-    } else {
-        addOverviewRow(m_vaultStatsGrid, 0, tr("Warning"), tr("Path does not exist"), "#ff3b30");
-        m_r2moStatsCard->setVisible(false);
-        m_previewProjectCache = PreviewProjectCache{};
-    }
+        stats.hasObsidianConfig = m_vaultValidator->hasObsidianConfig(path);
+        return stats;
+    });
+    m_localPreviewStatsWatcher->setFuture(localStatsFuture);
+    requestPreviewProjectCache(path, false);
 }
 
-MainWindow::PreviewProjectCache MainWindow::loadPreviewProjectCache(const QString& vaultPath) const
+MainWindow::PreviewProjectCache MainWindow::loadPreviewProjectCache(const QString& vaultPath, bool includeProjects) const
 {
     PreviewProjectCache cache;
     cache.vaultPath = vaultPath;
@@ -3614,8 +3702,45 @@ MainWindow::PreviewProjectCache MainWindow::loadPreviewProjectCache(const QStrin
     }
 
     R2moScanner scanner;
-    cache.projects = scanner.scanVault(vaultPath);
+    const QList<R2moSubProject> projects = scanner.scanVault(vaultPath);
+    cache.projectCount = projects.size();
+    for (const R2moSubProject& proj : projects) {
+        cache.totalQueue += proj.taskQueueCount;
+        cache.totalHistorical += proj.historicalTaskCount;
+    }
+    if (includeProjects) {
+        cache.projects = projects;
+        cache.projectsLoaded = true;
+    }
     return cache;
+}
+
+void MainWindow::requestPreviewProjectCache(const QString& vaultPath, bool includeProjects)
+{
+    ensurePreviewAsyncInfrastructureInitialized();
+
+    QFuture<PreviewProjectCache> future = QtConcurrent::run([this, vaultPath, includeProjects]() {
+        return loadPreviewProjectCache(vaultPath, includeProjects);
+    });
+    m_previewProjectCacheWatcher->setFuture(future);
+}
+
+void MainWindow::requestRemoteDirectoryPreview(const Vault& vault)
+{
+    ensurePreviewAsyncInfrastructureInitialized();
+
+    if (!vault.isRemote()) {
+        return;
+    }
+
+    QFuture<RemoteDirectoryFetchResult> future = QtConcurrent::run([this, vault]() {
+        RemoteDirectoryFetchResult result;
+        result.vaultPath = vault.path;
+        result.basePath = vault.remotePath;
+        result.entries = fetchRemoteDirectories(vault, vault.remotePath, &result.errorMessage);
+        return result;
+    });
+    m_remoteDirectoryPreviewWatcher->setFuture(future);
 }
 
 void MainWindow::clearPreviewTabContent()
@@ -3635,31 +3760,201 @@ void MainWindow::clearPreviewTabContent()
     }
 }
 
+void MainWindow::ensureOverviewInitialized()
+{
+    if (m_overviewContent || !m_overviewTab) {
+        return;
+    }
+
+    QVBoxLayout *layout = qobject_cast<QVBoxLayout*>(m_overviewTab->layout());
+    if (!layout) {
+        layout = new QVBoxLayout(m_overviewTab);
+        layout->setContentsMargins(8, 8, 8, 8);
+        layout->setSpacing(8);
+    }
+
+    m_overviewContent = new QWidget(m_overviewTab);
+    QVBoxLayout *overviewContentLayout = new QVBoxLayout(m_overviewContent);
+    overviewContentLayout->setContentsMargins(0, 0, 0, 0);
+    overviewContentLayout->setSpacing(8);
+
+    m_overviewPathLabel = new QLabel(m_overviewContent);
+    m_overviewPathLabel->setWordWrap(true);
+    m_overviewPathLabel->setStyleSheet("QLabel { color: #ff3b30; font-size: 16px; background: transparent; }");
+    overviewContentLayout->addWidget(m_overviewPathLabel);
+
+    m_vaultStatsCard = new QFrame(m_overviewContent);
+    m_vaultStatsCard->setStyleSheet("QFrame { background: transparent; border: none; }");
+    QVBoxLayout *vaultCardLayout = new QVBoxLayout(m_vaultStatsCard);
+    vaultCardLayout->setContentsMargins(0, 0, 0, 0);
+    vaultCardLayout->setSpacing(0);
+    m_vaultStatsHeader = new QLabel(tr("Vault Statistics"), m_vaultStatsCard);
+    m_vaultStatsHeader->setStyleSheet("QLabel { background: #f5f5f7; color: #1d1d1f; font-size: 15px; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e0e0e0; }");
+    vaultCardLayout->addWidget(m_vaultStatsHeader);
+    m_vaultStatsBody = new QWidget(m_vaultStatsCard);
+    m_vaultStatsBody->setStyleSheet("QWidget { background: transparent; }");
+    m_vaultStatsGrid = new QGridLayout(m_vaultStatsBody);
+    m_vaultStatsGrid->setContentsMargins(0, 0, 0, 0);
+    m_vaultStatsGrid->setHorizontalSpacing(0);
+    m_vaultStatsGrid->setVerticalSpacing(0);
+    m_vaultStatsGrid->setColumnStretch(0, 1);
+    m_vaultStatsGrid->setColumnStretch(1, 1);
+    vaultCardLayout->addWidget(m_vaultStatsBody);
+    overviewContentLayout->addWidget(m_vaultStatsCard);
+
+    m_r2moStatsCard = new QFrame(m_overviewContent);
+    m_r2moStatsCard->setStyleSheet("QFrame { background: transparent; border: none; }");
+    QVBoxLayout *r2moCardLayout = new QVBoxLayout(m_r2moStatsCard);
+    r2moCardLayout->setContentsMargins(0, 0, 0, 0);
+    r2moCardLayout->setSpacing(0);
+    m_r2moStatsHeader = new QLabel(tr("R2MO Statistics"), m_r2moStatsCard);
+    m_r2moStatsHeader->setStyleSheet("QLabel { background: #f5f5f7; color: #1d1d1f; font-size: 15px; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e0e0e0; }");
+    r2moCardLayout->addWidget(m_r2moStatsHeader);
+    m_r2moStatsBody = new QWidget(m_r2moStatsCard);
+    m_r2moStatsBody->setStyleSheet("QWidget { background: transparent; }");
+    m_r2moStatsGrid = new QGridLayout(m_r2moStatsBody);
+    m_r2moStatsGrid->setContentsMargins(0, 0, 0, 0);
+    m_r2moStatsGrid->setHorizontalSpacing(0);
+    m_r2moStatsGrid->setVerticalSpacing(0);
+    m_r2moStatsGrid->setColumnStretch(0, 1);
+    m_r2moStatsGrid->setColumnStretch(1, 1);
+    r2moCardLayout->addWidget(m_r2moStatsBody);
+    overviewContentLayout->addWidget(m_r2moStatsCard);
+
+    overviewContentLayout->addStretch(1);
+    layout->addWidget(m_overviewContent, 1);
+    m_overviewContent->setVisible(false);
+}
+
+void MainWindow::ensureTasksTabInitialized()
+{
+    if (m_taskTree || !m_tasksTab) {
+        return;
+    }
+
+    QVBoxLayout *layout = qobject_cast<QVBoxLayout*>(m_tasksTab->layout());
+    if (!layout) {
+        layout = new QVBoxLayout(m_tasksTab);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(0);
+    }
+
+    m_taskTree = new QTreeWidget(m_tasksTab);
+    m_taskTree->setHeaderLabel(tr("Tasks"));
+    m_taskTree->setIndentation(22);
+    m_taskTree->setUniformRowHeights(false);
+    m_taskTree->setStyleSheet("QTreeWidget { border: none; background: white; } QTreeWidget::item { padding: 6px 4px; } QTreeWidget::item:selected { background: #007aff; color: white; }");
+    m_taskTree->setAlternatingRowColors(false);
+    m_taskTree->setRootIsDecorated(true);
+    m_taskTree->setItemsExpandable(true);
+    m_taskTree->setAnimated(true);
+    layout->addWidget(m_taskTree, 1);
+
+    connect(m_taskTree, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onTaskItemDoubleClicked);
+}
+
+void MainWindow::ensureGraphTabInitialized()
+{
+    if (m_graphView || !m_graphTab) {
+        return;
+    }
+
+    QVBoxLayout *layout = qobject_cast<QVBoxLayout*>(m_graphTab->layout());
+    if (!layout) {
+        layout = new QVBoxLayout(m_graphTab);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(0);
+    }
+
+    if (!m_graphScene) {
+        m_graphScene = new QGraphicsScene(this);
+    }
+
+    m_graphView = new QGraphicsView(m_graphScene, m_graphTab);
+    m_graphView->setRenderHint(QPainter::Antialiasing);
+    m_graphView->setStyleSheet("QGraphicsView { border: none; background: white; }");
+    m_graphView->setDragMode(QGraphicsView::ScrollHandDrag);
+    m_graphView->setRenderHint(QPainter::SmoothPixmapTransform);
+    m_graphView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+    m_graphView->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+    m_graphView->setResizeAnchor(QGraphicsView::AnchorUnderMouse);
+    m_graphView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_graphView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_graphView->setBackgroundBrush(QBrush(QColor("#fafafa")));
+    m_graphView->installEventFilter(this);
+    layout->addWidget(m_graphView, 1);
+}
+
+void MainWindow::ensureAIToolsTabInitialized()
+{
+    if ((m_aiToolsEmptyLabel || m_aiToolsTree) || !m_aiToolsTab) {
+        return;
+    }
+
+    QVBoxLayout *layout = qobject_cast<QVBoxLayout*>(m_aiToolsTab->layout());
+    if (!layout) {
+        layout = new QVBoxLayout(m_aiToolsTab);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(0);
+    }
+
+    m_aiToolsEmptyLabel = new QLabel(tr("Select a vault with AI tool configurations..."), m_aiToolsTab);
+    m_aiToolsEmptyLabel->setAlignment(Qt::AlignCenter);
+    m_aiToolsEmptyLabel->setWordWrap(true);
+    m_aiToolsEmptyLabel->setStyleSheet("QLabel { color: #86868b; font-size: 15px; padding: 24px; }");
+    layout->addWidget(m_aiToolsEmptyLabel, 1);
+
+    m_aiToolsTree = new QTreeWidget(m_aiToolsTab);
+    m_aiToolsTree->setHeaderLabel(tr("AI Tools"));
+    m_aiToolsTree->setIndentation(22);
+    m_aiToolsTree->setUniformRowHeights(false);
+    m_aiToolsTree->setStyleSheet("QTreeWidget { border: none; background: white; } QTreeWidget::item { padding: 6px 4px; } QTreeWidget::item:selected { background: #007aff; color: white; }");
+    m_aiToolsTree->setAlternatingRowColors(false);
+    m_aiToolsTree->setRootIsDecorated(true);
+    m_aiToolsTree->setItemsExpandable(true);
+    m_aiToolsTree->setAnimated(true);
+    m_aiToolsTree->setVisible(false);
+    layout->addWidget(m_aiToolsTree, 1);
+
+    connect(m_aiToolsTree, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onAIToolItemDoubleClicked);
+}
+
 void MainWindow::ensurePreviewTabContent(int tabIndex)
 {
     if (m_currentPreviewPath.trimmed().isEmpty()) {
         return;
     }
 
+    if (tabIndex == 0 && m_previewProjectCache.projectsLoaded) {
+        m_previewProjectCache.projects.clear();
+        m_previewProjectCache.projects.squeeze();
+        m_previewProjectCache.projectsLoaded = false;
+        return;
+    }
+
     if (!m_previewProjectCache.loaded || m_previewProjectCache.vaultPath != m_currentPreviewPath) {
-        m_previewProjectCache = loadPreviewProjectCache(m_currentPreviewPath);
+        requestPreviewProjectCache(m_currentPreviewPath, true);
+        return;
     }
 
     if (tabIndex == 1) {
-        if (m_taskTree && m_taskTree->topLevelItemCount() == 0 && !m_previewProjectCache.projects.isEmpty()) {
+        ensureTasksTabInitialized();
+        if (m_taskTree && m_taskTree->topLevelItemCount() == 0 && m_previewProjectCache.projectsLoaded && !m_previewProjectCache.projects.isEmpty()) {
             buildTaskTree(m_previewProjectCache.projects);
         }
         return;
     }
 
     if (tabIndex == 2) {
-        if (m_graphScene && m_graphScene->items().isEmpty() && !m_previewProjectCache.projects.isEmpty()) {
+        ensureGraphTabInitialized();
+        if (m_graphScene && m_graphScene->items().isEmpty() && m_previewProjectCache.projectsLoaded && !m_previewProjectCache.projects.isEmpty()) {
             drawProjectGraph(m_previewProjectCache.projects);
         }
         return;
     }
 
     if (tabIndex == 3) {
+        ensureAIToolsTabInitialized();
         const bool aiTreeEmpty = m_aiToolsTree && m_aiToolsTree->topLevelItemCount() == 0;
         if (aiTreeEmpty) {
             buildAIToolsTab(m_currentPreviewPath);
@@ -3669,6 +3964,7 @@ void MainWindow::ensurePreviewTabContent(int tabIndex)
 
 void MainWindow::setOverviewEmptyState(bool empty)
 {
+    ensureOverviewInitialized();
     m_overviewEmptyLabel->setVisible(empty);
     m_overviewContent->setVisible(!empty);
     if (empty) {
@@ -4145,10 +4441,18 @@ void MainWindow::retranslateUi()
     // Retranslate labels
     m_vaultLabel->setText(tr("Vaults"));
     m_previewLabel->setText(tr("Preview"));
-    m_vaultStatsHeader->setText(tr("Vault Statistics"));
-    m_r2moStatsHeader->setText(tr("R2MO Statistics"));
-    m_taskTree->setHeaderLabel(tr("Tasks"));
-    m_aiToolsTree->setHeaderLabel(tr("AI Tools"));
+    if (m_vaultStatsHeader) {
+        m_vaultStatsHeader->setText(tr("Vault Statistics"));
+    }
+    if (m_r2moStatsHeader) {
+        m_r2moStatsHeader->setText(tr("R2MO Statistics"));
+    }
+    if (m_taskTree) {
+        m_taskTree->setHeaderLabel(tr("Tasks"));
+    }
+    if (m_aiToolsTree) {
+        m_aiToolsTree->setHeaderLabel(tr("AI Tools"));
+    }
     
     // Retranslate buttons and tooltips
     m_addBtn->setText(QStringLiteral("+"));
@@ -4263,10 +4567,9 @@ void MainWindow::addSwimlaneCloseButton(int tabIndex)
         int idx = m_mainTabWidget->indexOf(m_swimlaneTabContent);
         if (idx > 0) {
             m_mainTabWidget->removeTab(idx);
-            if (m_cachedSwimlaneWidget && m_cachedSwimlaneWidget != m_swimlaneTabContent) {
-                m_cachedSwimlaneWidget->deleteLater();
+            if (m_swimlaneTabContent) {
+                m_swimlaneTabContent->deleteLater();
             }
-            m_cachedSwimlaneWidget = nullptr;
             m_swimlaneTabContent = nullptr;
             if (m_swimlaneRefreshTimer) {
                 m_swimlaneRefreshTimer->stop();
@@ -4278,16 +4581,7 @@ void MainWindow::addSwimlaneCloseButton(int tabIndex)
 
 void MainWindow::onSwimlane()
 {
-    if (m_cachedSwimlaneWidget) {
-        m_swimlaneTabContent = m_cachedSwimlaneWidget;
-        int idx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
-        addSwimlaneCloseButton(idx);
-        m_mainTabWidget->setCurrentIndex(idx);
-        if (m_swimlaneRefreshTimer) {
-            m_swimlaneRefreshTimer->start();
-        }
-        return;
-    }
+    ensureSwimlaneInfrastructureInitialized();
 
     if (m_swimlaneRefreshing) return;
     m_swimlaneRefreshing = true;
@@ -4338,12 +4632,16 @@ void MainWindow::onSwimlane()
     
     // Start progress animation
     m_loadingProgressStep = 0;
-    m_loadingProgressTimer->start();
+    if (m_loadingProgressTimer) {
+        m_loadingProgressTimer->start();
+    }
     
     QFuture<SwimlaneScanData> future = QtConcurrent::run([this]() {
         return this->collectSwimlaneData();
     });
-    m_swimlaneScanWatcher->setFuture(future);
+    if (m_swimlaneScanWatcher) {
+        m_swimlaneScanWatcher->setFuture(future);
+    }
     
     if (m_swimlaneRefreshTimer) {
         m_swimlaneRefreshTimer->start();
@@ -4718,6 +5016,8 @@ QWidget* MainWindow::buildSwimlaneView(const SwimlaneScanData& scanData)
 
 void MainWindow::refreshSwimlaneAsync()
 {
+    ensureSwimlaneInfrastructureInitialized();
+
     if (m_swimlaneRefreshing) return;
     if (!m_swimlaneTabContent) return;
 
@@ -4761,11 +5061,10 @@ void MainWindow::refreshSwimlaneAsync()
     progressBar->setStyleSheet("QProgressBar { border: 1px solid #e0e0e0; border-radius: 4px; background: #f5f5f7; height: 6px; } QProgressBar::chunk { background: #007aff; border-radius: 3px; }");
     overlayLayout->addWidget(progressBar);
     
-    if (m_cachedSwimlaneWidget && m_cachedSwimlaneWidget != m_swimlaneTabContent) {
-        m_cachedSwimlaneWidget->deleteLater();
-    }
-    m_cachedSwimlaneWidget = nullptr;
     m_mainTabWidget->removeTab(idx);
+    if (m_swimlaneTabContent) {
+        m_swimlaneTabContent->deleteLater();
+    }
     m_swimlaneTabContent = loadingOverlay;
     int newIdx = m_mainTabWidget->addTab(m_swimlaneTabContent, tr("Swimlane"));
     addSwimlaneCloseButton(newIdx);
@@ -4773,12 +5072,16 @@ void MainWindow::refreshSwimlaneAsync()
     
     // Start progress animation
     m_loadingProgressStep = 0;
-    m_loadingProgressTimer->start();
+    if (m_loadingProgressTimer) {
+        m_loadingProgressTimer->start();
+    }
     
     QFuture<SwimlaneScanData> future = QtConcurrent::run([this]() {
         return this->collectSwimlaneData();
     });
-    m_swimlaneScanWatcher->setFuture(future);
+    if (m_swimlaneScanWatcher) {
+        m_swimlaneScanWatcher->setFuture(future);
+    }
 }
 
 void MainWindow::showHistoricalTasksDialog(const QString& r2moPath, const QString& projectName)
@@ -4920,10 +5223,13 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                 const QModelIndex index = tree->indexAt(mouseEvent->pos());
                 if (index.isValid() && index.column() == 1) {
                     if (QTreeWidgetItem *item = tree->itemFromIndex(index)) {
-                        const QRect gridRect = tree->visualRect(index);
-                        const QVariantList cells = item->data(0, kMonitorGridCellsRole).toList();
-                        const QVariantList copyHits = monitorGridHitRects(gridRect, cells, true);
-                        item->setData(0, kMonitorCopyHitRectsRole, copyHits);
+                        QVariantList copyHits = item->data(0, kMonitorCopyHitRectsRole).toList();
+                        if (copyHits.isEmpty()) {
+                            const QRect gridRect = tree->visualRect(index);
+                            const QVariantList cells = item->data(0, kMonitorGridCellsRole).toList();
+                            copyHits = monitorGridHitRects(gridRect, cells, true);
+                            item->setData(0, kMonitorCopyHitRectsRole, copyHits);
+                        }
                         for (const QVariant& hitValue : copyHits) {
                             const QVariantMap hit = hitValue.toMap();
                             if (hit.value(QStringLiteral("rect")).toRect().contains(mouseEvent->pos())) {
@@ -4949,10 +5255,13 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             const QModelIndex index = tree->indexAt(helpEvent->pos());
             if (index.isValid() && index.column() == 1) {
                 if (QTreeWidgetItem *item = tree->itemFromIndex(index)) {
-                    const QRect gridRect = tree->visualRect(index);
-                    const QVariantList cells = item->data(0, kMonitorGridCellsRole).toList();
-                    const QVariantList terminalHits = monitorGridHitRects(gridRect, cells, false);
-                    item->setData(0, kMonitorTerminalHitRectsRole, terminalHits);
+                    QVariantList terminalHits = item->data(0, kMonitorTerminalHitRectsRole).toList();
+                    if (terminalHits.isEmpty()) {
+                        const QRect gridRect = tree->visualRect(index);
+                        const QVariantList cells = item->data(0, kMonitorGridCellsRole).toList();
+                        terminalHits = monitorGridHitRects(gridRect, cells, false);
+                        item->setData(0, kMonitorTerminalHitRectsRole, terminalHits);
+                    }
                     for (const QVariant& hitValue : terminalHits) {
                         const QVariantMap hit = hitValue.toMap();
                         if (hit.value(QStringLiteral("rect")).toRect().contains(helpEvent->pos())) {
@@ -5024,10 +5333,16 @@ void MainWindow::buildAIToolsTab(const QString& vaultPath)
         m_aiToolsTree->setVisible(false);
         return;
     }
-    
-    // Use R2moScanner to get project structure (same as Task Tree)
-    R2moScanner scanner;
-    QList<R2moSubProject> projects = scanner.scanVault(vaultPath);
+
+    if (!m_previewProjectCache.loaded || m_previewProjectCache.vaultPath != vaultPath) {
+        m_aiToolsEmptyLabel->setText(tr("Loading AI tool configurations..."));
+        m_aiToolsEmptyLabel->setVisible(true);
+        m_aiToolsTree->setVisible(false);
+        requestPreviewProjectCache(vaultPath, true);
+        return;
+    }
+
+    const QList<R2moSubProject> projects = m_previewProjectCache.projects;
     
     if (projects.isEmpty()) {
         m_aiToolsEmptyLabel->setText(tr("No R2MO projects found."));
@@ -5060,9 +5375,7 @@ void MainWindow::buildAIToolsTree(const QList<R2moSubProject>& projects)
     }
     
     if (!parent) return;
-    
-    AIToolScanner aiScanner;
-    
+
     // Build parent node off-tree first, only attach when it has real AI tools
     QTreeWidgetItem* parentItem = new QTreeWidgetItem();
     parentItem->setText(0, QString("📁 %1").arg(parent->name));
@@ -5080,7 +5393,7 @@ void MainWindow::buildAIToolsTree(const QList<R2moSubProject>& projects)
         childItem->setData(0, Qt::UserRole, child->path);
         
         // Add AI tools for sub-project
-        QList<AIToolInfo> childTools = aiScanner.scanProject(child->path);
+        const QList<AIToolInfo> childTools = cachedAIToolsForPath(child->path);
         const bool childHasTools = addAIToolsToItem(childItem, childTools);
         if (childHasTools) {
             parentItem->addChild(childItem);
@@ -5091,7 +5404,7 @@ void MainWindow::buildAIToolsTree(const QList<R2moSubProject>& projects)
     }
     
     // Add AI tools for parent project AFTER sub-projects
-    QList<AIToolInfo> parentTools = aiScanner.scanProject(parent->path);
+    const QList<AIToolInfo> parentTools = cachedAIToolsForPath(parent->path);
     parentHasAnyTools = addAIToolsToItem(parentItem, parentTools) || parentHasAnyTools;
 
     if (parentHasAnyTools) {
@@ -5177,6 +5490,8 @@ bool MainWindow::addAIToolsToItem(QTreeWidgetItem* parentItem, const QList<AIToo
 
 void MainWindow::onSwimlaneRefresh()
 {
+    ensureSwimlaneInfrastructureInitialized();
+
     if (m_swimlaneRefreshing) return;
     
     m_swimlaneRefreshing = true;
@@ -5184,7 +5499,9 @@ void MainWindow::onSwimlaneRefresh()
     QFuture<SwimlaneScanData> future = QtConcurrent::run([this]() {
         return this->collectSwimlaneData();
     });
-    m_swimlaneScanWatcher->setFuture(future);
+    if (m_swimlaneScanWatcher) {
+        m_swimlaneScanWatcher->setFuture(future);
+    }
 }
 
 void MainWindow::addMonitorCloseButton(int tabIndex)
@@ -5199,14 +5516,17 @@ void MainWindow::addMonitorCloseButton(int tabIndex)
         int idx = m_mainTabWidget->indexOf(m_monitorTabContent);
         if (idx > 0) {
             m_mainTabWidget->removeTab(idx);
-            if (m_cachedMonitorWidget && m_cachedMonitorWidget != m_monitorTabContent) {
-                m_cachedMonitorWidget->deleteLater();
+            if (m_monitorTabContent) {
+                m_monitorTabContent->deleteLater();
             }
-            m_cachedMonitorWidget = nullptr;
             m_monitorTabContent = nullptr;
             if (m_monitorRefreshTimer) {
                 m_monitorRefreshTimer->stop();
             }
+            if (m_specialMonitorRefreshTimer) {
+                m_specialMonitorRefreshTimer->stop();
+            }
+            setMonitorArtifactWatchEnabled(false);
         }
     });
     m_mainTabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeBtn);
@@ -5214,6 +5534,18 @@ void MainWindow::addMonitorCloseButton(int tabIndex)
 
 QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths()
 {
+    return cachedProjectPaths();
+}
+
+QList<QPair<QString, QString>> MainWindow::cachedProjectPaths()
+{
+    const QDateTime now = QDateTime::currentDateTime();
+    constexpr int projectPathCacheTtlSeconds = 20;
+    if (m_projectPathCache.capturedAt.isValid() &&
+        m_projectPathCache.capturedAt.secsTo(now) < projectPathCacheTtlSeconds) {
+        return m_projectPathCache.data;
+    }
+
     QList<QPair<QString, QString>> result;
     QSet<QString> seenPaths;
     QList<Vault> vaults = m_vaultModel->vaults();
@@ -5249,30 +5581,22 @@ QList<QPair<QString, QString>> MainWindow::collectAllProjectPaths()
             seenPaths.insert(normalizedProjectPath);
         }
     }
-    
+
+    m_projectPathCache.data = result;
+    m_projectPathCache.capturedAt = now;
     return result;
 }
 
 void MainWindow::onMonitorBoard()
 {
-    if (m_cachedMonitorWidget) {
-        m_monitorTabContent = m_cachedMonitorWidget;
-        int idx = m_mainTabWidget->addTab(m_monitorTabContent, tr("Monitor Board"));
-        addMonitorCloseButton(idx);
-        m_mainTabWidget->setCurrentIndex(idx);
-        if (m_monitorRefreshTimer) {
-            m_monitorRefreshTimer->start();
-        }
-        return;
-    }
-    
     openMonitorTab();
 }
 
 void MainWindow::openMonitorTab()
 {
+    ensureMonitorInfrastructureInitialized();
+
     if (m_monitorRefreshing) return;
-    m_monitorRefreshing = true;
     
     QWidget *loadingWidget = new QWidget();
     loadingWidget->setStyleSheet("background: white;");
@@ -5309,35 +5633,19 @@ void MainWindow::openMonitorTab()
     int newIdx = m_mainTabWidget->addTab(m_monitorTabContent, tr("Monitor Board"));
     addMonitorCloseButton(newIdx);
     m_mainTabWidget->setCurrentIndex(newIdx);
-    
-    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
-        QList<QPair<QString, QString>> projects = collectAllProjectPaths();
-        SessionScanner scanner;
-        QList<ProjectMonitorData> data = scanner.scanLiveSessions(projects);
-        data.append(collectRemoteMonitorData());
-        return data;
-    });
-    m_monitorScanWatcher->setFuture(future);
-    
+
     if (m_monitorRefreshTimer) {
         m_monitorRefreshTimer->start();
     }
+    setMonitorArtifactWatchEnabled(true);
+    startMonitorRefresh(false);
 }
 
 void MainWindow::onMonitorRefresh()
 {
     if (m_monitorRefreshing) return;
-    
-    m_monitorRefreshing = true;
-    
-    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
-        QList<QPair<QString, QString>> projects = collectAllProjectPaths();
-        SessionScanner scanner;
-        QList<ProjectMonitorData> data = scanner.scanLiveSessions(projects);
-        data.append(collectRemoteMonitorData());
-        return data;
-    });
-    m_monitorScanWatcher->setFuture(future);
+
+    startMonitorRefresh(false);
 }
 
 void MainWindow::openMonitorTarget(QTreeWidgetItem *row)
@@ -5379,21 +5687,221 @@ void MainWindow::openMonitorTarget(QTreeWidgetItem *row)
 
 void MainWindow::refreshMonitorAsync()
 {
+    ensureMonitorInfrastructureInitialized();
+
     if (m_monitorRefreshing) return;
     if (!m_monitorTabContent) return;
 
-    m_monitorRefreshing = true;
     setMonitorRefreshEnabled(false);
     setMonitorRowsLoading(true);
+    startMonitorRefresh(false);
+}
 
-    QFuture<QList<ProjectMonitorData>> future = QtConcurrent::run([this]() {
-        QList<QPair<QString, QString>> projects = collectAllProjectPaths();
+void MainWindow::refreshMonitorLocalStatusAsync()
+{
+    ensureMonitorInfrastructureInitialized();
+
+    if (!m_monitorTabContent || !m_monitorArtifactWatcher) {
+        return;
+    }
+
+    if (m_monitorRefreshing) {
+        m_monitorLocalStatusRefreshPending = true;
+        if (m_monitorArtifactDebounceTimer) {
+            m_monitorArtifactDebounceTimer->start();
+        }
+        return;
+    }
+
+    startMonitorRefresh(true);
+}
+
+void MainWindow::startMonitorRefresh(bool localOnly)
+{
+    ensureMonitorInfrastructureInitialized();
+
+    if (!m_monitorTabContent || !m_monitorScanWatcher) {
+        return;
+    }
+
+    if (m_monitorRefreshing) {
+        if (localOnly) {
+            m_monitorLocalStatusRefreshPending = true;
+        }
+        return;
+    }
+
+    m_monitorRefreshing = true;
+    m_monitorLocalStatusRefreshPending = false;
+
+    QFuture<MonitorRefreshResult> future = QtConcurrent::run([this, localOnly]() {
+        MonitorRefreshResult result;
+        result.localOnly = localOnly;
+
+        const QList<QPair<QString, QString>> projects = collectAllProjectPaths();
         SessionScanner scanner;
-        QList<ProjectMonitorData> data = scanner.scanLiveSessions(projects);
-        data.append(collectRemoteMonitorData());
-        return data;
+        result.localData = scanner.scanLiveSessions(projects);
+        if (!localOnly) {
+            result.remoteData = collectRemoteMonitorData();
+        }
+        return result;
     });
     m_monitorScanWatcher->setFuture(future);
+}
+
+void MainWindow::applyMonitorRefreshResult(const MonitorRefreshResult& result)
+{
+    const QList<ProjectMonitorData> mergedData = result.localOnly
+        ? result.localData
+        : (result.localData + result.remoteData);
+
+    const bool updated = result.localOnly
+        ? updateMonitorLocalStatusCells(result.localData)
+        : updateMonitorStatusCells(mergedData);
+
+    if (!updated) {
+        if (result.localOnly) {
+            QTimer::singleShot(0, this, [this]() {
+                refreshMonitorAsync();
+            });
+            return;
+        }
+        QWidget *newWidget = buildMonitorView(mergedData);
+        replaceMonitorContent(newWidget, true);
+    }
+
+    if (!result.localOnly) {
+        m_monitorLocalStatusRefreshPending = false;
+    }
+}
+
+QStringList MainWindow::collectMonitorArtifactWatchPaths(const QList<QPair<QString, QString>>& projects) const
+{
+    QSet<QString> paths;
+    const QString homeDir = QDir::homePath();
+
+    const QString codexSessionsDir = homeDir + QStringLiteral("/.codex/sessions");
+    if (QFileInfo::exists(codexSessionsDir)) {
+        paths.insert(QDir::cleanPath(codexSessionsDir));
+    }
+
+    const QString claudeProjectsRoot = homeDir + QStringLiteral("/.claude/projects");
+    if (QFileInfo::exists(claudeProjectsRoot)) {
+        paths.insert(QDir::cleanPath(claudeProjectsRoot));
+    }
+
+    const QString openCodeRoot = homeDir + QStringLiteral("/Library/Application Support/ai.opencode.desktop");
+    if (QFileInfo::exists(openCodeRoot)) {
+        paths.insert(QDir::cleanPath(openCodeRoot));
+        const QString openCodeGlobal = openCodeRoot + QStringLiteral("/opencode.global.dat");
+        if (QFileInfo::exists(openCodeGlobal)) {
+            paths.insert(QDir::cleanPath(openCodeGlobal));
+        }
+    }
+
+    for (const auto& project : projects) {
+        const QString normalizedProjectPath = QDir::cleanPath(project.second);
+        if (normalizedProjectPath.isEmpty()) {
+            continue;
+        }
+
+        QString escaped = normalizedProjectPath;
+        escaped.replace("/", "-");
+        const QStringList claudeProjectDirs = {
+            claudeProjectsRoot + "/" + escaped,
+            claudeProjectsRoot + "/-" + escaped
+        };
+        for (const QString& claudeDir : claudeProjectDirs) {
+            if (QFileInfo::exists(claudeDir)) {
+                paths.insert(QDir::cleanPath(claudeDir));
+            }
+        }
+    }
+
+    return paths.values();
+}
+
+void MainWindow::rebuildMonitorArtifactWatchers()
+{
+    if (!m_monitorArtifactWatcher || !m_monitorTabContent) {
+        return;
+    }
+
+    const QList<QPair<QString, QString>> projects = collectAllProjectPaths();
+    const QStringList watchPaths = collectMonitorArtifactWatchPaths(projects);
+    const QSet<QString> desiredPaths(watchPaths.begin(), watchPaths.end());
+
+    const QStringList currentPaths = m_monitorArtifactWatcher->files() + m_monitorArtifactWatcher->directories();
+    QStringList removePaths;
+    for (const QString& path : currentPaths) {
+        if (!desiredPaths.contains(path)) {
+            removePaths.append(path);
+        }
+    }
+    if (!removePaths.isEmpty()) {
+        m_monitorArtifactWatcher->removePaths(removePaths);
+    }
+
+    m_monitorArtifactWatchPaths = desiredPaths;
+    for (const QString& path : watchPaths) {
+        upsertMonitorArtifactWatchPath(path);
+    }
+}
+
+void MainWindow::setMonitorArtifactWatchEnabled(bool enabled)
+{
+    if (!m_monitorArtifactWatcher) {
+        return;
+    }
+
+    if (!enabled) {
+        clearMonitorArtifactWatchPaths();
+        if (m_monitorArtifactDebounceTimer) {
+            m_monitorArtifactDebounceTimer->stop();
+        }
+        m_monitorLocalStatusRefreshPending = false;
+        return;
+    }
+
+    rebuildMonitorArtifactWatchers();
+}
+
+void MainWindow::upsertMonitorArtifactWatchPath(const QString& path)
+{
+    if (!m_monitorArtifactWatcher) {
+        return;
+    }
+
+    const QString normalizedPath = QDir::cleanPath(path);
+    if (normalizedPath.isEmpty()) {
+        return;
+    }
+
+    if (!QFileInfo::exists(normalizedPath)) {
+        if (m_monitorArtifactWatchPaths.remove(normalizedPath)) {
+            m_monitorArtifactWatcher->removePath(normalizedPath);
+        }
+        return;
+    }
+
+    m_monitorArtifactWatchPaths.insert(normalizedPath);
+    const QStringList currentPaths = m_monitorArtifactWatcher->files() + m_monitorArtifactWatcher->directories();
+    if (!currentPaths.contains(normalizedPath)) {
+        m_monitorArtifactWatcher->addPath(normalizedPath);
+    }
+}
+
+void MainWindow::clearMonitorArtifactWatchPaths()
+{
+    if (!m_monitorArtifactWatcher) {
+        return;
+    }
+
+    const QStringList currentPaths = m_monitorArtifactWatcher->files() + m_monitorArtifactWatcher->directories();
+    if (!currentPaths.isEmpty()) {
+        m_monitorArtifactWatcher->removePaths(currentPaths);
+    }
+    m_monitorArtifactWatchPaths.clear();
 }
 
 void MainWindow::setMonitorRefreshEnabled(bool enabled)
@@ -5524,6 +6032,10 @@ void MainWindow::pruneScanCaches()
 
     pruneExpired(m_gitStatusCache, 30);
     pruneExpired(m_aiToolCache, 30);
+    if (!m_projectPathCache.capturedAt.isValid() ||
+        m_projectPathCache.capturedAt.secsTo(now) >= 20) {
+        m_projectPathCache = TimedProjectPathCache{};
+    }
 }
 
 void MainWindow::replaceMonitorContent(QWidget *newContent, bool preserveCurrentTab)
@@ -5531,11 +6043,6 @@ void MainWindow::replaceMonitorContent(QWidget *newContent, bool preserveCurrent
     if (!newContent) {
         return;
     }
-
-    if (m_cachedMonitorWidget && m_cachedMonitorWidget != m_monitorTabContent && m_cachedMonitorWidget != newContent) {
-        m_cachedMonitorWidget->deleteLater();
-    }
-    m_cachedMonitorWidget = newContent;
 
     if (!m_monitorTabContent) {
         m_monitorTabContent = newContent;
@@ -5652,11 +6159,134 @@ bool MainWindow::updateMonitorStatusCells(const QList<ProjectMonitorData>& data)
         row->setText(0, expectedRows[i].projectName);
         row->setData(0, kMonitorProjectNameRole, expectedRows[i].projectName);
         row->setData(0, kMonitorGridCellsRole, expectedRows[i].cells);
+        row->setData(0, kMonitorCopyHitRectsRole, QVariantList{});
+        row->setData(0, kMonitorTerminalHitRectsRole, QVariantList{});
         row->setSizeHint(1, QSize(0, expectedRows[i].rowHeight));
     }
 
     tree->viewport()->update();
     return true;
+}
+
+bool MainWindow::updateMonitorLocalStatusCells(const QList<ProjectMonitorData>& localData)
+{
+    if (!m_monitorTabContent) {
+        return false;
+    }
+
+    QTreeWidget *tree = m_monitorTabContent->findChild<QTreeWidget*>("monitorBoardTree");
+    if (!tree) {
+        return false;
+    }
+
+    if (tree->topLevelItemCount() == 1) {
+        QTreeWidgetItem *onlyRow = tree->topLevelItem(0);
+        if (onlyRow && onlyRow->data(0, kMonitorProjectPathRole).toString().isEmpty() &&
+            onlyRow->data(0, kMonitorGridCellsRole).toList().isEmpty()) {
+            delete tree->takeTopLevelItem(0);
+        }
+    }
+
+    QList<ProjectMonitorData> expectedLocalRows;
+    for (const ProjectMonitorData& pmd : localData) {
+        if (!pmd.sessions.isEmpty()) {
+            expectedLocalRows.append(pmd);
+        }
+    }
+
+    QHash<QString, QTreeWidgetItem*> localRowsByPath;
+    QList<int> removeIndexes;
+    bool hasRemoteRows = false;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *row = tree->topLevelItem(i);
+        if (!row) {
+            return false;
+        }
+
+        const QString projectPath = row->data(0, kMonitorProjectPathRole).toString();
+        if (projectPath.isEmpty() || !projectPath.startsWith(QStringLiteral("ssh://"))) {
+            localRowsByPath.insert(projectPath, row);
+        } else {
+            hasRemoteRows = true;
+        }
+    }
+
+    int insertIndex = 0;
+    for (const ProjectMonitorData& pmd : expectedLocalRows) {
+        const QVariantList cells = monitorToolCellsToVariant(buildMonitorToolCells(pmd, this));
+        QTreeWidgetItem *row = localRowsByPath.take(pmd.projectPath);
+        if (!row) {
+            row = createMonitorTreeRow(pmd, tree);
+            tree->insertTopLevelItem(insertIndex, row);
+        } else {
+            const int currentIndex = tree->indexOfTopLevelItem(row);
+            if (currentIndex >= 0 && currentIndex != insertIndex) {
+                tree->takeTopLevelItem(currentIndex);
+                tree->insertTopLevelItem(insertIndex, row);
+            }
+            row->setText(0, pmd.projectName);
+            row->setText(2, tr("Goto"));
+            row->setToolTip(0, pmd.projectPath);
+            row->setData(0, kMonitorProjectPathRole, pmd.projectPath);
+            row->setData(0, kMonitorProjectNameRole, pmd.projectName);
+            row->setData(0, kMonitorGridCellsRole, cells);
+            row->setData(0, kMonitorRowKeyRole, monitorProjectGridKey(pmd.projectPath, cells));
+            row->setData(0, kMonitorCopyHitRectsRole, QVariantList{});
+            row->setData(0, kMonitorTerminalHitRectsRole, QVariantList{});
+            if (!pmd.sessions.isEmpty()) {
+                row->setData(0, kMonitorTerminalPidRole, pmd.sessions.first().terminalPid);
+            }
+            row->setSizeHint(1, QSize(0, monitorGridRowHeight(monitorGridRowCount(cells))));
+        }
+        ++insertIndex;
+    }
+
+    for (auto it = localRowsByPath.begin(); it != localRowsByPath.end(); ++it) {
+        if (QTreeWidgetItem *row = it.value()) {
+            const int index = tree->indexOfTopLevelItem(row);
+            if (index >= 0) {
+                removeIndexes.prepend(index);
+            }
+        }
+    }
+
+    for (int index : removeIndexes) {
+        delete tree->takeTopLevelItem(index);
+    }
+
+    if (tree->topLevelItemCount() == 0 && !hasRemoteRows) {
+        QTreeWidgetItem *emptyItem = new QTreeWidgetItem(tree);
+        emptyItem->setText(0, tr("No active AI sessions detected."));
+        emptyItem->setForeground(0, QColor("#86868b"));
+        emptyItem->setFirstColumnSpanned(true);
+    }
+
+    tree->viewport()->update();
+    updateMonitorTableColumns(tree);
+    return true;
+}
+
+QTreeWidgetItem* MainWindow::createMonitorTreeRow(const ProjectMonitorData& pmd, QTreeWidget *tree) const
+{
+    Q_UNUSED(tree);
+
+    const QVariantList cells = monitorToolCellsToVariant(buildMonitorToolCells(pmd, this));
+    QTreeWidgetItem *row = new QTreeWidgetItem();
+    row->setText(0, pmd.projectName);
+    row->setText(2, tr("Goto"));
+    row->setToolTip(0, pmd.projectPath);
+    row->setToolTip(1, tr("Click a copy button to copy the restore command. Hover terminal icons to see terminal type."));
+    row->setData(0, kMonitorProjectPathRole, pmd.projectPath);
+    row->setData(0, kMonitorProjectNameRole, pmd.projectName);
+    row->setData(0, kMonitorGridCellsRole, cells);
+    row->setData(0, kMonitorRowKeyRole, monitorProjectGridKey(pmd.projectPath, cells));
+    row->setData(0, kMonitorCopyHitRectsRole, QVariantList{});
+    row->setData(0, kMonitorTerminalHitRectsRole, QVariantList{});
+    if (!pmd.sessions.isEmpty()) {
+        row->setData(0, kMonitorTerminalPidRole, pmd.sessions.first().terminalPid);
+    }
+    row->setSizeHint(1, QSize(0, monitorGridRowHeight(monitorGridRowCount(cells))));
+    return row;
 }
 
 QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorData)
@@ -5735,21 +6365,7 @@ QWidget* MainWindow::buildMonitorView(const QList<ProjectMonitorData>& monitorDa
             if (pmd.sessions.isEmpty()) {
                 continue;
             }
-
-            const QVariantList cells = monitorToolCellsToVariant(buildMonitorToolCells(pmd, this));
-            QTreeWidgetItem *row = new QTreeWidgetItem(tree);
-            row->setText(0, pmd.projectName);
-            row->setText(2, tr("Goto"));
-            row->setToolTip(0, pmd.projectPath);
-            row->setToolTip(1, tr("Click a copy button to copy the restore command. Hover terminal icons to see terminal type."));
-            row->setData(0, kMonitorProjectPathRole, pmd.projectPath);
-            row->setData(0, kMonitorProjectNameRole, pmd.projectName);
-            row->setData(0, kMonitorGridCellsRole, cells);
-            row->setData(0, kMonitorRowKeyRole, monitorProjectGridKey(pmd.projectPath, cells));
-            if (!pmd.sessions.isEmpty()) {
-                row->setData(0, kMonitorTerminalPidRole, pmd.sessions.first().terminalPid);
-            }
-            row->setSizeHint(1, QSize(0, monitorGridRowHeight(monitorGridRowCount(cells))));
+            tree->addTopLevelItem(createMonitorTreeRow(pmd, tree));
         }
     }
 

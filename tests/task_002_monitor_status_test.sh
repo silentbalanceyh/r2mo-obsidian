@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 header="$repo_root/src/utils/sessionscanner.h"
 scanner_source="$repo_root/src/utils/sessionscanner.cpp"
 window_source="$repo_root/src/mainwindow.cpp"
+window_header="$repo_root/src/mainwindow.h"
 
 require_pattern() {
     local pattern="$1"
@@ -32,6 +33,14 @@ require_pattern 'qint64[[:space:]]+runtimeSeconds;' "$header" \
     "SessionInfo must store cumulative runtime seconds for monitor status display."
 require_pattern 'QString[[:space:]]+formatSessionRuntime[[:space:]]*\([[:space:]]*qint64[[:space:]]+runtimeSeconds[[:space:]]*\)[[:space:]]+const' "$repo_root/src/mainwindow.h" \
     "MainWindow must expose a formatter for cumulative session runtime."
+require_pattern 'struct[[:space:]]+MonitorRefreshResult' "$window_header" \
+    "Monitor refreshes should use an explicit result object to separate local and remote data."
+require_pattern 'void[[:space:]]+startMonitorRefresh[[:space:]]*\([[:space:]]*bool[[:space:]]+localOnly[[:space:]]*\)' "$window_header" \
+    "Monitor board must expose a unified refresh entrypoint with a local-only mode."
+require_pattern 'bool[[:space:]]+updateMonitorLocalStatusCells[[:space:]]*\([[:space:]]*const[[:space:]]+QList<ProjectMonitorData>&[[:space:]]+localData[[:space:]]*\)' "$window_header" \
+    "Monitor board must support in-place local status updates for watcher-triggered refreshes."
+require_pattern 'void[[:space:]]+applyMonitorRefreshResult[[:space:]]*\([[:space:]]*const[[:space:]]+MonitorRefreshResult&[[:space:]]+result[[:space:]]*\)' "$window_header" \
+    "Monitor board must apply local and full refresh results through a dedicated merge path."
 require_pattern 'class[[:space:]]+MonitorToolGridDelegate' "$window_source" \
     "Monitor rows should render status through a delegate to avoid per-row widget overhead."
 require_pattern 'const[[:space:]]+QString[[:space:]]+statusText[[:space:]]*=[[:space:]]*cell.status[[:space:]]*==[[:space:]]*SessionStatus::Working' "$window_source" \
@@ -58,6 +67,24 @@ require_pattern 'updateMonitorStatusLabel\(QWidget \*label, SessionStatus status
     "Monitor status updater must operate on a generic QWidget container, not a QLabel."
 require_pattern 'setItemDelegate\(new[[:space:]]+MonitorToolGridDelegate\(tree\)\)' "$window_source" \
     "Monitor tree should install the lightweight delegate for status/action painting."
+require_pattern 'result\.localOnly[[:space:]]*=[[:space:]]*localOnly' "$window_source" \
+    "Unified monitor refresh should preserve whether the scan is local-only."
+require_pattern 'if[[:space:]]*\([[:space:]]*!localOnly[[:space:]]*\)' "$window_source" \
+    "Unified refresh path must branch on local-only mode before touching remote monitor data."
+require_pattern 'result\.remoteData[[:space:]]*=[[:space:]]*collectRemoteMonitorData\(\);' "$window_source" \
+    "Remote monitor polling should only be populated through the explicit full-refresh path."
+require_pattern 'updateMonitorLocalStatusCells\(result\.localData\)' "$window_source" \
+    "Watcher-triggered refreshes must update local rows in place."
+require_pattern 'QTimer::singleShot\(0,[[:space:]]*this,' "$window_source" \
+    "If local in-place reconciliation fails, monitor board must schedule a deferred refresh on the UI thread."
+require_pattern 'refreshMonitorAsync\(\);' "$window_source" \
+    "If local in-place reconciliation fails, monitor board must fall back to a full refresh."
+require_pattern 'upsertMonitorArtifactWatchPath\(path\);' "$window_source" \
+    "File watcher events should only patch individual watch paths instead of rebuilding the whole watcher."
+forbid_pattern 'QFileSystemWatcher::directoryChanged[^\\n]*rebuildMonitorArtifactWatchers' "$window_source" \
+    "Directory watcher events must not rebuild the entire watch list eagerly."
+forbid_pattern 'QFileSystemWatcher::fileChanged[^\\n]*rebuildMonitorArtifactWatchers' "$window_source" \
+    "File watcher events must not rebuild the entire watch list eagerly."
 require_pattern 'const[[:space:]]+qint64[[:space:]]+runningSeconds[[:space:]]*=' "$scanner_source" \
     "Session scanning must calculate cumulative running seconds."
 require_pattern 'runtimeSeconds[[:space:]]*=' "$scanner_source" \
@@ -78,6 +105,14 @@ require_pattern 'type[[:space:]]*==[[:space:]]*"tool_use"' "$scanner_source" \
     "Claude status detection must handle tool_use events explicitly."
 require_pattern 'return[[:space:]]+eventIsFresh[[:space:]]*\?[[:space:]]*SessionStatus::Working[[:space:]]*:[[:space:]]*SessionStatus::Ready' "$scanner_source" \
     "Claude status detection must degrade stale activity events back to Ready instead of leaving phantom Working states."
+require_pattern 'hookEvent[[:space:]]*==[[:space:]]*"PostToolUse"' "$scanner_source" \
+    "Claude status detection must inspect PostToolUse events explicitly."
+require_pattern 'return[[:space:]]+readyStateIsFresh[[:space:]]*\?[[:space:]]*SessionStatus::Ready[[:space:]]*:[[:space:]]*SessionStatus::Unknown' "$scanner_source" \
+    "Claude PostToolUse hook completions must resolve to Ready/Unknown instead of staying Working."
+require_pattern 'artifactStatus[[:space:]]*==[[:space:]]*SessionStatus::Ready' "$scanner_source" \
+    "Explicit artifact Ready handling must exist in status determination."
+require_pattern 's_lastWorkingTime\.remove\(pid\)' "$scanner_source" \
+    "Explicit artifact Ready must clear the Working keep-alive instead of being overridden by it."
 forbid_pattern 'isRunning[[:space:]]*&&[[:space:]]*deltaPerSecond[[:space:]]*>=[[:space:]]*25000' "$scanner_source" \
     "CPU fallback must not flip to Working from a single low-threshold running sample during refresh."
 

@@ -36,7 +36,7 @@ require_pattern 'return ":/icons/ui/terminal-terminalapp.png";' "$scanner_source
     "Terminal.app icon mapping must use a checked-in project asset."
 require_pattern 'if (lower.contains("ssh")) return ":/icons/ui/terminal-ubuntu.svg";' "$scanner_source" \
     "SSH terminal rows must use the Ubuntu-style icon."
-require_pattern 'row->setIcon(1, QIcon(terminalPix.scaled(14, 14, Qt::KeepAspectRatio, Qt::SmoothTransformation)));' "$window_source" \
+require_pattern 'const QPixmap terminalPix = cachedScaledPixmap(cell.terminalIconPath, 14, 14);' "$window_source" \
     "Monitor terminal icons must be normalized to 14x14 for alignment with text."
 require_pattern '<file>ui/terminal-wezterm.png</file>' "$icons_qrc" \
     "The extracted WezTerm terminal icon must be registered in the UI icon bundle."

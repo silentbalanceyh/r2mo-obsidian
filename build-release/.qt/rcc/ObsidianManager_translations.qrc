@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/i18n">
+    <file alias="obsidianmanager_zh_CN.qm">/Users/lang/zero-cloud/app-zero/r2mo-mine/r2mo-obsidian/build-release/obsidianmanager_zh_CN.qm</file>
+    <file alias="obsidianmanager_en_US.qm">/Users/lang/zero-cloud/app-zero/r2mo-mine/r2mo-obsidian/build-release/obsidianmanager_en_US.qm</file>
+  </qresource>
+</RCC>
+

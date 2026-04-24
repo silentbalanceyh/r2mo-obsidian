@@ -170,6 +170,64 @@ QDateTime parseUnixTimestampSeconds(qint64 value)
     return QDateTime::fromSecsSinceEpoch(value, QTimeZone::UTC);
 }
 
+QString firstStatusScalar(const QJsonValue& value)
+{
+    if (value.isString()) {
+        return value.toString().trimmed().toLower();
+    }
+
+    if (value.isObject()) {
+        const QJsonObject object = value.toObject();
+        const QStringList priorityKeys = {
+            QStringLiteral("status"),
+            QStringLiteral("state"),
+            QStringLiteral("phase"),
+            QStringLiteral("value")
+        };
+        for (const QString& key : priorityKeys) {
+            const QString nested = firstStatusScalar(object.value(key));
+            if (!nested.isEmpty()) {
+                return nested;
+            }
+        }
+    }
+
+    if (value.isArray()) {
+        const QJsonArray array = value.toArray();
+        for (const QJsonValue& item : array) {
+            const QString nested = firstStatusScalar(item);
+            if (!nested.isEmpty()) {
+                return nested;
+            }
+        }
+    }
+
+    return QString();
+}
+
+bool isActiveStatusWord(const QString& value)
+{
+    return value == QStringLiteral("working") ||
+           value == QStringLiteral("running") ||
+           value == QStringLiteral("busy") ||
+           value == QStringLiteral("streaming") ||
+           value == QStringLiteral("thinking") ||
+           value == QStringLiteral("generating") ||
+           value == QStringLiteral("pending");
+}
+
+bool isReadyStatusWord(const QString& value)
+{
+    return value == QStringLiteral("ready") ||
+           value == QStringLiteral("idle") ||
+           value == QStringLiteral("paused") ||
+           value == QStringLiteral("complete") ||
+           value == QStringLiteral("completed") ||
+           value == QStringLiteral("done") ||
+           value == QStringLiteral("error") ||
+           value == QStringLiteral("failed");
+}
+
 bool workspaceTerminalMentionsProject(const QString& rawContent, const QString& projectPath)
 {
     const QString normalizedPath = QDir::cleanPath(projectPath);
@@ -662,7 +720,7 @@ QByteArray SessionScanner::readArtifactTail(const QString& sessionPath, qint64 m
 
 SessionStatus SessionScanner::inferCodexArtifactStatus(const QString& sessionPath) const
 {
-    const double codexActiveFreshSeconds = 8.0;
+    const double codexActiveFreshSeconds = 30.0;
     const QByteArray tail = readArtifactTail(sessionPath);
     if (tail.isEmpty()) {
         return SessionStatus::Unknown;
@@ -733,8 +791,8 @@ SessionStatus SessionScanner::inferCodexArtifactStatus(const QString& sessionPat
 
 SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPath) const
 {
-    const double claudeActiveFreshSeconds = 8.0;
-    const double claudeReadyFreshSeconds = 45.0;
+    const double claudeActiveFreshSeconds = 30.0;
+    const double claudeReadyFreshSeconds = 90.0;
     const QByteArray tail = readArtifactTail(sessionPath);
     if (tail.isEmpty()) {
         return SessionStatus::Unknown;
@@ -767,8 +825,11 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
             const QJsonObject attachment = object.value("attachment").toObject();
             const QString hookEvent = attachment.value("hookEvent").toString();
             const QString attachmentType = attachment.value("type").toString();
-            if (hookEvent == "PreToolUse" || hookEvent == "PostToolUse") {
-                return SessionStatus::Working;
+            if (hookEvent == "PreToolUse") {
+                return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+            }
+            if (hookEvent == "PostToolUse") {
+                return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
             }
             if (hookEvent == "Stop" ||
                 attachmentType == "hook_success" ||
@@ -781,8 +842,11 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
         if (type == "progress") {
             const QJsonObject data = object.value("data").toObject();
             const QString hookEvent = data.value("hookEvent").toString();
-            if (hookEvent == "PreToolUse" || hookEvent == "PostToolUse") {
+            if (hookEvent == "PreToolUse") {
                 return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+            }
+            if (hookEvent == "PostToolUse") {
+                return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
             }
             if (hookEvent == "Stop") {
                 return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
@@ -853,7 +917,7 @@ SessionStatus SessionScanner::inferOpenCodeGlobalStatus(const QString& sessionId
         return SessionStatus::Unknown;
     }
 
-    const double openCodeActiveFreshSeconds = 8.0;
+    const double openCodeActiveFreshSeconds = 30.0;
     const QString globalPath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation)
         + "/Library/Application Support/ai.opencode.desktop/opencode.global.dat";
     const QByteArray tail = readArtifactTail(globalPath, 262144);
@@ -893,16 +957,28 @@ SessionStatus SessionScanner::inferOpenCodeGlobalStatus(const QString& sessionId
         const QString type = entry.value("type").toString();
         const qint64 notificationEpochMs = static_cast<qint64>(entry.value("time").toDouble());
         const QDateTime notificationTime = notificationEpochMs > 0
-            ? QDateTime::fromMSecsSinceEpoch(notificationEpochMs, Qt::UTC)
+            ? QDateTime::fromMSecsSinceEpoch(notificationEpochMs, QTimeZone::UTC)
             : QDateTime();
         const bool notificationIsFresh = notificationTime.isValid() &&
             notificationTime.msecsTo(QDateTime::currentDateTimeUtc()) <=
                 static_cast<qint64>(openCodeActiveFreshSeconds * 1000.0);
-        if (type == "turn-start" || type == "session.status") {
+        if (type == "turn-start") {
             return notificationIsFresh ? SessionStatus::Working : SessionStatus::Ready;
         }
         if (type == "turn-complete" || type == "error") {
             return SessionStatus::Ready;
+        }
+        if (type == "session.status") {
+            const QString statusValue = firstStatusScalar(entry.value("status"));
+            if (isActiveStatusWord(statusValue)) {
+                return notificationIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+            }
+            if (isReadyStatusWord(statusValue) ||
+                !statusValue.isEmpty() ||
+                entry.value("paused").toBool(false)) {
+                return SessionStatus::Ready;
+            }
+            return notificationIsFresh ? SessionStatus::Unknown : SessionStatus::Ready;
         }
         return SessionStatus::Unknown;
     }
@@ -941,11 +1017,13 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
                                               const QString& toolName, const QString& sessionId,
                                               const QString& sessionPath) const
 {
-    const double workingKeepAliveSeconds = 6.0;
+    const double workingKeepAliveSeconds = 30.0;
     const SessionStatus artifactStatus = inferArtifactStatus(toolName, sessionId, sessionPath);
     if (artifactStatus != SessionStatus::Unknown) {
         if (artifactStatus == SessionStatus::Working) {
             s_lastWorkingTime[pid] = QDateTime::currentDateTime();
+        } else if (artifactStatus == SessionStatus::Ready) {
+            s_lastWorkingTime.remove(pid);
         }
         return artifactStatus;
     }

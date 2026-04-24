@@ -13,10 +13,10 @@ int main(int argc, char *argv[])
     app.setApplicationVersion("1.0.0");
     app.setOrganizationName("R2MO");
     
-    // Load embedded MesloLGS NF fonts
+    // Keep embedded MesloLGS NF fonts available for theme and graph rendering.
     QFontDatabase::addApplicationFont(":/fonts/MesloLGS-NF-Regular.ttf");
     QFontDatabase::addApplicationFont(":/fonts/MesloLGS-NF-Bold.ttf");
-    
+
     // Set default font to PingFang SC for Chinese (14px)
     QFont defaultFont = QFont("PingFang SC", 14);
     app.setFont(defaultFont);

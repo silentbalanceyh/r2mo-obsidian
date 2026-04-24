@@ -18,8 +18,11 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QTimer>
+#include <QFileSystemWatcher>
 #include <QFutureWatcher>
 #include <QHash>
+#include <QPixmap>
+#include <QSet>
 #include <QStringList>
 #include "theme/thememanager.h"
 #include "utils/gitscanner.h"
@@ -73,6 +76,11 @@ struct TimedAIToolCache {
     QDateTime capturedAt;
 };
 
+struct TimedProjectPathCache {
+    QList<QPair<QString, QString>> data;
+    QDateTime capturedAt;
+};
+
 struct TimedSpecialMonitorCache {
     QList<SpecialMonitorSnapshot> data;
     QDateTime capturedAt;
@@ -119,6 +127,32 @@ private:
         QList<R2moSubProject> projects;
         bool hasR2moConfig = false;
         bool loaded = false;
+        bool projectsLoaded = false;
+        int projectCount = 0;
+        int totalQueue = 0;
+        int totalHistorical = 0;
+    };
+
+    struct LocalPreviewStats {
+        QString vaultPath;
+        int files = 0;
+        int folders = 0;
+        int hiddenItems = 0;
+        bool hasObsidianConfig = false;
+        bool pathExists = false;
+    };
+
+    struct MonitorRefreshResult {
+        QList<ProjectMonitorData> localData;
+        QList<ProjectMonitorData> remoteData;
+        bool localOnly = false;
+    };
+
+    struct RemoteDirectoryFetchResult {
+        QString vaultPath;
+        QString basePath;
+        QList<RemoteDirectoryEntry> entries;
+        QString errorMessage;
     };
 
     void setupMenuBar();
@@ -150,6 +184,16 @@ private:
     void onAIToolItemDoubleClicked(QTreeWidgetItem* item, int column);
     void drawProjectGraph(const QList<R2moSubProject>& projects);
     void buildTaskTree(const QList<R2moSubProject>& projects);
+    void ensureOverviewInitialized();
+    void ensureTasksTabInitialized();
+    void ensureGraphTabInitialized();
+    void ensureAIToolsTabInitialized();
+    void ensureSwimlaneInfrastructureInitialized();
+    void ensurePreviewAsyncInfrastructureInitialized();
+    void ensureMonitorInfrastructureInitialized();
+    void ensureRemoteConnectivityInfrastructureInitialized();
+    void ensureSpecialMonitorInfrastructureInitialized();
+    void applyLocalPreviewStats(const LocalPreviewStats& stats);
     void setOverviewEmptyState(bool empty);
     void clearOverviewGrid(QGridLayout *layout);
     void addOverviewRow(QGridLayout *layout, int row, const QString& label, const QString& value,
@@ -174,10 +218,13 @@ private:
     QWidget* buildSwimlaneView();
     GitStatusInfo cachedGitStatusForPath(const QString& path);
     QList<AIToolInfo> cachedAIToolsForPath(const QString& path);
+    QList<QPair<QString, QString>> cachedProjectPaths();
     void pruneScanCaches();
     void openMonitorTab();
     void addMonitorCloseButton(int tabIndex);
     void refreshMonitorAsync();
+    void refreshMonitorLocalStatusAsync();
+    void startMonitorRefresh(bool localOnly);
     QList<QPair<QString, QString>> collectAllProjectPaths();
     QWidget* buildMonitorView(const QList<ProjectMonitorData>& data);
     QWidget* buildSpecialMonitorPanel();
@@ -198,6 +245,7 @@ private:
     void setMonitorRowsLoading(bool loading);
     QString formatSessionRuntime(qint64 runtimeSeconds) const;
     bool updateMonitorStatusCells(const QList<ProjectMonitorData>& data);
+    bool updateMonitorLocalStatusCells(const QList<ProjectMonitorData>& localData);
     QString monitorRowKey(const QString& projectPath, const SessionInfo& session) const;
     void copyMonitorRestoreCommand(const QString& command);
     void updateMonitorStatusLabel(QWidget *label, SessionStatus status) const;
@@ -205,10 +253,19 @@ private:
     void syncVaultOrderFromList();
     void openMonitorTarget(QTreeWidgetItem *row);
     void invalidateMonitorView(bool refreshIfOpen);
+    void applyMonitorRefreshResult(const MonitorRefreshResult& result);
+    void rebuildMonitorArtifactWatchers();
+    QStringList collectMonitorArtifactWatchPaths(const QList<QPair<QString, QString>>& projects) const;
+    void setMonitorArtifactWatchEnabled(bool enabled);
+    void upsertMonitorArtifactWatchPath(const QString& path);
+    void clearMonitorArtifactWatchPaths();
+    QTreeWidgetItem* createMonitorTreeRow(const ProjectMonitorData& data, QTreeWidget *tree) const;
+    void requestPreviewProjectCache(const QString& vaultPath, bool includeProjects = false);
+    void requestRemoteDirectoryPreview(const Vault& vault);
     bool activateTerminalWindow(qint64 pid);
     void ensurePreviewTabContent(int tabIndex);
     void clearPreviewTabContent();
-    PreviewProjectCache loadPreviewProjectCache(const QString& vaultPath) const;
+    PreviewProjectCache loadPreviewProjectCache(const QString& vaultPath, bool includeProjects) const;
 
     // Toolbar
     QToolBar *m_toolBar;
@@ -262,10 +319,10 @@ private:
     QTreeWidget *m_aiToolsTree;
     int m_swimlaneTabIndex;
     QWidget *m_swimlaneView;
-    QWidget *m_cachedSwimlaneWidget;
     TimedSwimlaneCache m_swimlaneDataCache;
     QHash<QString, TimedGitStatusCache> m_gitStatusCache;
     QHash<QString, TimedAIToolCache> m_aiToolCache;
+    TimedProjectPathCache m_projectPathCache;
     QTimer *m_swimlaneRefreshTimer;
     QFutureWatcher<SwimlaneScanData> *m_swimlaneScanWatcher;
     bool m_swimlaneRefreshing;
@@ -274,12 +331,18 @@ private:
     int m_loadingProgressStep;
     QString m_currentPreviewPath;
     PreviewProjectCache m_previewProjectCache;
+    QFutureWatcher<LocalPreviewStats> *m_localPreviewStatsWatcher;
+    QFutureWatcher<PreviewProjectCache> *m_previewProjectCacheWatcher;
+    QFutureWatcher<RemoteDirectoryFetchResult> *m_remoteDirectoryPreviewWatcher;
     int m_monitorTabIndex;
     QWidget *m_monitorView;
-    QWidget *m_cachedMonitorWidget;
     QTimer *m_monitorRefreshTimer;
-    QFutureWatcher<QList<ProjectMonitorData>> *m_monitorScanWatcher;
+    QTimer *m_monitorArtifactDebounceTimer;
+    QFileSystemWatcher *m_monitorArtifactWatcher;
+    QFutureWatcher<MonitorRefreshResult> *m_monitorScanWatcher;
     bool m_monitorRefreshing;
+    bool m_monitorLocalStatusRefreshPending;
+    QSet<QString> m_monitorArtifactWatchPaths;
     QLabel *m_monitorProgressLabel;
     int m_monitorProgressStep;
     QTimer *m_memoryUsageTimer;
