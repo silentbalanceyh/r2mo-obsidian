@@ -1,2 +1,10 @@
+model = "gpt-5.5"
+model_provider = "r2mo-gw"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
+
+[model_providers.r2mo-gw]
+name = "r2mo-gw"
+base_url = "http://mxt.modelgw.cn:1231"
+wire_api = "responses"
+env_key = "OPEN_GW_KEY_MXT"

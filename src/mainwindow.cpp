@@ -86,7 +86,8 @@ struct SpecialMonitorProviderOption {
 QList<SpecialMonitorProviderOption> specialMonitorProviders()
 {
     return {
-        {QStringLiteral("💻 PP Coding"), QStringLiteral("https://code.ppchat.vip")}
+        {QStringLiteral("💻 PP Coding"), QStringLiteral("https://code.ppchat.vip")},
+        {QStringLiteral("🧩 CM Key"), QStringLiteral("https://cmkey.cn/api/query")}
     };
 }
 

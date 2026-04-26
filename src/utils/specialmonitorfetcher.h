@@ -35,6 +35,7 @@ public:
 
 private:
     SpecialMonitorSnapshot fetchPPCodingSnapshot(const SpecialMonitorSource& source) const;
+    SpecialMonitorSnapshot fetchCMKeySnapshot(const SpecialMonitorSource& source) const;
 };
 
 #endif // SPECIALMONITORFETCHER_H

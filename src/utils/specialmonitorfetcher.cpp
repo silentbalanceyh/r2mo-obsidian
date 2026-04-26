@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QDateTime>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -21,6 +22,13 @@ int jsonInt(const QJsonValue& value)
 {
     return value.toVariant().toInt();
 }
+
+bool isCMKeyProviderUrl(const QString& baseUrl)
+{
+    const QUrl url(SpecialMonitorFetcher::normalizeBaseUrl(baseUrl));
+    return url.host() == QStringLiteral("cmkey.cn") &&
+        (url.path().isEmpty() || url.path() == QStringLiteral("/api/query"));
+}
 }
 
 QList<SpecialMonitorSnapshot> SpecialMonitorFetcher::fetchSnapshots(
@@ -31,6 +39,10 @@ QList<SpecialMonitorSnapshot> SpecialMonitorFetcher::fetchSnapshots(
         const QString normalizedUrl = normalizeBaseUrl(source.baseUrl);
         if (normalizedUrl == "https://code.ppchat.vip") {
             snapshots.append(fetchPPCodingSnapshot(source));
+            continue;
+        }
+        if (isCMKeyProviderUrl(normalizedUrl)) {
+            snapshots.append(fetchCMKeySnapshot(source));
             continue;
         }
 
@@ -55,6 +67,9 @@ QString SpecialMonitorFetcher::defaultProviderName(const QString& baseUrl)
 {
     if (normalizeBaseUrl(baseUrl) == "https://code.ppchat.vip") {
         return QStringLiteral("💻 PP Coding");
+    }
+    if (isCMKeyProviderUrl(baseUrl)) {
+        return QStringLiteral("🧩 CM Key");
     }
     return QStringLiteral("🔗 Special Monitor");
 }
@@ -155,6 +170,91 @@ SpecialMonitorSnapshot SpecialMonitorFetcher::fetchPPCodingSnapshot(
     snapshot.updatedAt = data.value(QStringLiteral("logs")).toArray().isEmpty()
         ? QString()
         : data.value(QStringLiteral("logs")).toArray().first().toObject().value(QStringLiteral("created_time")).toString();
+
+    return snapshot;
+}
+
+SpecialMonitorSnapshot SpecialMonitorFetcher::fetchCMKeySnapshot(
+    const SpecialMonitorSource& source) const
+{
+    SpecialMonitorSnapshot snapshot;
+    snapshot.source = source;
+
+    if (source.tokenKey.trimmed().isEmpty()) {
+        snapshot.errorMessage = QStringLiteral("Token key is empty");
+        return snapshot;
+    }
+
+    QUrl url(QStringLiteral("https://cmkey.cn/api/query"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("key"), source.tokenKey.trimmed());
+    url.setQuery(query);
+
+    QNetworkAccessManager manager;
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("R2MO-Obsidian/1.0"));
+
+    QNetworkReply* reply = manager.get(request);
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    bool timedOut = false;
+
+    QObject::connect(&timeout, &QTimer::timeout, &loop, [&]() {
+        timedOut = true;
+        if (!reply->isFinished()) {
+            reply->abort();
+        }
+        loop.quit();
+    });
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+
+    timeout.start(5000);
+    loop.exec();
+
+    if (timedOut) {
+        snapshot.errorMessage = QStringLiteral("Request timed out");
+        reply->deleteLater();
+        return snapshot;
+    }
+
+    timeout.stop();
+    const QByteArray payload = reply->readAll();
+    const QNetworkReply::NetworkError networkError = reply->error();
+    const QString errorText = reply->errorString();
+    reply->deleteLater();
+
+    if (networkError != QNetworkReply::NoError) {
+        snapshot.errorMessage = errorText;
+        return snapshot;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(payload, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        snapshot.errorMessage = QStringLiteral("Invalid JSON response");
+        return snapshot;
+    }
+
+    const QJsonObject root = doc.object();
+    if (!root.value(QStringLiteral("success")).toBool()) {
+        snapshot.errorMessage = QStringLiteral("API returned failure");
+        return snapshot;
+    }
+
+    const QJsonObject data = root.value(QStringLiteral("data")).toObject();
+    snapshot.accountName = data.value(QStringLiteral("token_name")).toString();
+    const int periodHours = jsonInt(data.value(QStringLiteral("period_limit_hours")));
+    snapshot.packageType = periodHours > 0
+        ? QStringLiteral("每%1%2").arg(periodHours).arg(QStringLiteral("小时"))
+        : data.value(QStringLiteral("primary_label")).toString();
+    snapshot.todayAddedQuota = jsonLongLong(data.value(QStringLiteral("period_limit")));
+    snapshot.todayUsedQuota = jsonLongLong(data.value(QStringLiteral("period_used")));
+    snapshot.remainQuota = jsonLongLong(data.value(QStringLiteral("period_remain")));
+    snapshot.todayUsageCount = jsonInt(data.value(QStringLiteral("total_calls")));
+    snapshot.todayOpusUsage = 0;
+    snapshot.totalLogCount = snapshot.todayUsageCount;
+    snapshot.updatedAt = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
 
     return snapshot;
 }
