@@ -839,6 +839,8 @@ MainWindow::MainWindow(QWidget *parent)
       , m_monitorProgressStep(0)
       , m_memoryUsageTimer(nullptr)
       , m_remoteConnectivityTimer(nullptr)
+      , m_countdownLabel(nullptr)
+      , m_countdownTimer(nullptr)
       , m_specialMonitorPanel(nullptr)
       , m_specialMonitorTable(nullptr)
       , m_specialMonitorScanWatcher(nullptr)
@@ -1120,6 +1122,39 @@ void MainWindow::updateToolbarIcons()
     if (homeIdx >= 0) {
         m_mainTabWidget->setTabIcon(homeIdx, createHomeIcon(baseColor));
     }
+}
+
+void MainWindow::updateCountdown()
+{
+    if (!m_countdownLabel) {
+        return;
+    }
+
+    const QDateTime now = QDateTime::currentDateTime();
+    qint64 secs = now.secsTo(m_countdownTarget);
+    if (secs < 0) {
+        secs = 0;
+    }
+
+    const qint64 totalDays = secs / 86400;
+    const qint64 remainder = secs % 86400;
+    const int months = static_cast<int>(totalDays / 30);
+    const int days = static_cast<int>(totalDays % 30);
+    const int hours = static_cast<int>(remainder / 3600);
+    const int minutes = static_cast<int>((remainder % 3600) / 60);
+    const int seconds = static_cast<int>(remainder % 60);
+
+    m_countdownLabel->setText(tr("%1 %2 %3 %4 %5:%6:%7")
+        .arg(months)
+        .arg(tr("months"))
+        .arg(days)
+        .arg(tr("days"))
+        .arg(hours, 2, 10, QLatin1Char('0'))
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(seconds, 2, 10, QLatin1Char('0')));
+
+    m_countdownLabel->setToolTip(tr("25-year countdown from %1")
+        .arg(m_countdownTarget.addYears(-25).toString(QLocale().dateFormat(QLocale::ShortFormat))));
 }
 
 void MainWindow::updateMemoryUsageLabel()
@@ -1483,7 +1518,43 @@ void MainWindow::setupCentralWidget()
     m_mainTabWidget->setTabIcon(0, createHomeIcon(
         (ThemeManager::instance()->currentTheme() == ThemeManager::Light)
             ? QColor("#333333") : QColor("#f5f5f7")));
-    
+
+    // Countdown label in the main tab bar corner (Home / Swimlane / Monitor Board)
+    m_countdownLabel = new QLabel(m_mainTabWidget);
+    m_countdownLabel->setObjectName("countdownLabel");
+    m_countdownLabel->setAlignment(Qt::AlignCenter);
+    m_countdownLabel->setStyleSheet(
+        "QLabel#countdownLabel {"
+        "  color: #ff3b30;"
+        "  font-size: 20px;"
+        "  font-weight: 800;"
+        "  font-family: 'Menlo', 'Courier New', monospace;"
+        "  padding: 2px 14px;"
+        "  background: #fff3f0;"
+        "  border: 1px solid #ffccc7;"
+        "  border-radius: 4px;"
+        "}"
+    );
+    m_mainTabWidget->setCornerWidget(m_countdownLabel, Qt::TopRightCorner);
+
+    // Calculate countdown target: 25 years from reference date
+    {
+        const QString savedRef = m_settingsManager->countdownReferenceDate();
+        if (savedRef.isEmpty()) {
+            const QString nowStr = QDateTime::currentDateTime().toString(Qt::ISODate);
+            m_settingsManager->setCountdownReferenceDate(nowStr);
+            m_countdownTarget = QDateTime::currentDateTime().addYears(25);
+        } else {
+            m_countdownTarget = QDateTime::fromString(savedRef, Qt::ISODate).addYears(25);
+        }
+    }
+    updateCountdown();
+
+    m_countdownTimer = new QTimer(this);
+    m_countdownTimer->setInterval(1000);
+    connect(m_countdownTimer, &QTimer::timeout, this, &MainWindow::updateCountdown);
+    m_countdownTimer->start();
+
     m_swimlaneTabContent = nullptr;
     m_monitorTabContent = nullptr;
 

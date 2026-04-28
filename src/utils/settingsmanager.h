@@ -44,6 +44,10 @@ public:
     QByteArray specialMonitorHeaderState() const;
     void setSpecialMonitorHeaderState(const QByteArray& state);
     
+    // Countdown reference date
+    QString countdownReferenceDate() const;
+    void setCountdownReferenceDate(const QString& date);
+
     void sync();
 
 private:

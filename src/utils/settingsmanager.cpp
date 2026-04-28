@@ -136,6 +136,16 @@ void SettingsManager::setSpecialMonitorHeaderState(const QByteArray& state)
     m_settings.setValue("specialMonitorHeaderState.v3", state);
 }
 
+QString SettingsManager::countdownReferenceDate() const
+{
+    return m_settings.value("countdownReferenceDate").toString();
+}
+
+void SettingsManager::setCountdownReferenceDate(const QString& date)
+{
+    m_settings.setValue("countdownReferenceDate", date);
+}
+
 void SettingsManager::sync()
 {
     m_settings.sync();

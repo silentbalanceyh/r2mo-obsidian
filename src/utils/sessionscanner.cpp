@@ -793,6 +793,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
 {
     const double claudeActiveFreshSeconds = 30.0;
     const double claudeReadyFreshSeconds = 90.0;
+    const double claudeUserTurnWindowSeconds = 300.0;
     const QByteArray tail = readArtifactTail(sessionPath);
     if (tail.isEmpty()) {
         return SessionStatus::Unknown;
@@ -808,6 +809,51 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
         return SessionStatus::Unknown;
     }
 
+    // Phase 1: Determine if there's an active user-initiated turn.
+    // Background hooks can write PreToolUse/PostToolUse/tool_use events even
+    // when the user hasn't typed anything. A session should only be Working
+    // if those tool events belong to a turn that was initiated by the user.
+    QDateTime lastUserEventTime;
+    QDateTime lastTurnEndTime;
+    bool foundUserEvent = false;
+    bool foundTurnEnd = false;
+
+    for (const QJsonObject& object : objects) {
+        const QString type = object.value("type").toString();
+        const QString subtype = object.value("subtype").toString();
+        const QDateTime eventTime = parseArtifactEventTime(object);
+
+        if (!foundUserEvent && (type == "user" || type == "last-prompt") && eventTime.isValid()) {
+            lastUserEventTime = eventTime;
+            foundUserEvent = true;
+        }
+
+        if (!foundTurnEnd && eventTime.isValid()) {
+            if (type == "assistant") {
+                const QString stopReason = object.value("message").toObject().value("stop_reason").toString();
+                if (stopReason == "end_turn") {
+                    lastTurnEndTime = eventTime;
+                    foundTurnEnd = true;
+                }
+            } else if (type == "system" && (subtype == "turn_duration" || subtype == "away_summary")) {
+                lastTurnEndTime = eventTime;
+                foundTurnEnd = true;
+            }
+        }
+
+        if (foundUserEvent && foundTurnEnd) {
+            break;
+        }
+    }
+
+    // A turn is active when a user event exists with no definitive end after it,
+    // and the user event is recent enough to plausibly still be in progress.
+    const bool hasActiveUserTurn = lastUserEventTime.isValid() &&
+        (!lastTurnEndTime.isValid() || lastUserEventTime > lastTurnEndTime) &&
+        lastUserEventTime.secsTo(QDateTime::currentDateTimeUtc()) <= claudeUserTurnWindowSeconds;
+
+    // Phase 2: Apply event-matching logic with user-turn awareness.
+    // Working is only returned when the event is fresh AND there's an active user turn.
     for (const QJsonObject& object : objects) {
         const QString type = object.value("type").toString();
         const QString subtype = object.value("subtype").toString();
@@ -826,7 +872,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
             const QString hookEvent = attachment.value("hookEvent").toString();
             const QString attachmentType = attachment.value("type").toString();
             if (hookEvent == "PreToolUse") {
-                return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+                return (eventIsFresh && hasActiveUserTurn) ? SessionStatus::Working : SessionStatus::Ready;
             }
             if (hookEvent == "PostToolUse") {
                 return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
@@ -843,7 +889,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
             const QJsonObject data = object.value("data").toObject();
             const QString hookEvent = data.value("hookEvent").toString();
             if (hookEvent == "PreToolUse") {
-                return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+                return (eventIsFresh && hasActiveUserTurn) ? SessionStatus::Working : SessionStatus::Ready;
             }
             if (hookEvent == "PostToolUse") {
                 return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
@@ -858,7 +904,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
             const QJsonObject message = object.value("message").toObject();
             const QString stopReason = message.value("stop_reason").toString();
             if (stopReason == "tool_use") {
-                return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+                return (eventIsFresh && hasActiveUserTurn) ? SessionStatus::Working : SessionStatus::Ready;
             }
             if (stopReason == "end_turn") {
                 return readyStateIsFresh ? SessionStatus::Ready : SessionStatus::Unknown;
@@ -881,7 +927,7 @@ SessionStatus SessionScanner::inferClaudeArtifactStatus(const QString& sessionPa
         }
 
         if (type == "tool_use") {
-            return eventIsFresh ? SessionStatus::Working : SessionStatus::Ready;
+            return (eventIsFresh && hasActiveUserTurn) ? SessionStatus::Working : SessionStatus::Ready;
         }
     }
 
@@ -1017,7 +1063,7 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
                                               const QString& toolName, const QString& sessionId,
                                               const QString& sessionPath) const
 {
-    const double workingKeepAliveSeconds = 30.0;
+    const double workingKeepAliveSeconds = 15.0;
     const SessionStatus artifactStatus = inferArtifactStatus(toolName, sessionId, sessionPath);
     if (artifactStatus != SessionStatus::Unknown) {
         if (artifactStatus == SessionStatus::Working) {
@@ -1055,11 +1101,14 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
 
     const qint64 elapsedMs = qMax<qint64>(1, nowMs - prevSampleMs);
     const double deltaPerSecond = (static_cast<double>(delta) * 1000.0) / static_cast<double>(elapsedMs);
-    const bool strongCpuBurst = deltaPerSecond >= 300000.0;
-    const bool sustainedCpuActivity = deltaPerSecond >= 90000.0;
+    // Thresholds raised: Claude/Electron processes have significant idle CPU,
+    // causing false Working status. Only flag as Working on genuinely high CPU
+    // that indicates active inference or file I/O.
+    const bool strongCpuBurst = deltaPerSecond >= 800000.0;
+    const bool sustainedCpuActivity = deltaPerSecond >= 250000.0;
 
     if (strongCpuBurst) {
-        s_highActivitySamples[pid] = qMax(2, s_highActivitySamples.value(pid, 0) + 1);
+        s_highActivitySamples[pid] = qMax(3, s_highActivitySamples.value(pid, 0) + 1);
         s_lastWorkingTime[pid] = QDateTime::currentDateTime();
         return SessionStatus::Working;
     }
@@ -1067,7 +1116,7 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
     if (sustainedCpuActivity) {
         const int highSamples = s_highActivitySamples.value(pid, 0) + 1;
         s_highActivitySamples[pid] = highSamples;
-        if (highSamples >= 2) {
+        if (highSamples >= 3) {
             s_lastWorkingTime[pid] = QDateTime::currentDateTime();
             return SessionStatus::Working;
         }

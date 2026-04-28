@@ -266,6 +266,7 @@ private:
     void ensurePreviewTabContent(int tabIndex);
     void clearPreviewTabContent();
     PreviewProjectCache loadPreviewProjectCache(const QString& vaultPath, bool includeProjects) const;
+    void updateCountdown();
 
     // Toolbar
     QToolBar *m_toolBar;
@@ -347,6 +348,9 @@ private:
     int m_monitorProgressStep;
     QTimer *m_memoryUsageTimer;
     QTimer *m_remoteConnectivityTimer;
+    QLabel *m_countdownLabel;
+    QTimer *m_countdownTimer;
+    QDateTime m_countdownTarget;
     QWidget *m_specialMonitorPanel;
     QTableWidget *m_specialMonitorTable;
     QFutureWatcher<QList<SpecialMonitorSnapshot>> *m_specialMonitorScanWatcher;
