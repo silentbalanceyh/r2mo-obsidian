@@ -234,6 +234,7 @@ private:
     void setSpecialMonitorRefreshLoading(bool loading);
     void setSpecialMonitorRowsLoading(bool loading);
     void updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& snapshots);
+    QList<SpecialMonitorSnapshot> mergeSpecialMonitorSnapshots(const QList<SpecialMonitorSnapshot>& freshSnapshots) const;
     void updateSpecialMonitorTableColumns();
     void addSpecialMonitorSource();
     void editSpecialMonitorSource();

@@ -1868,7 +1868,9 @@ void MainWindow::ensureSpecialMonitorInfrastructureInitialized()
         m_specialMonitorScanWatcher = new QFutureWatcher<QList<SpecialMonitorSnapshot>>(this);
         connect(m_specialMonitorScanWatcher, &QFutureWatcher<QList<SpecialMonitorSnapshot>>::finished, this, [this]() {
             if (m_specialMonitorRefreshing) {
-                m_specialMonitorDataCache.data = m_specialMonitorScanWatcher->result();
+                const QList<SpecialMonitorSnapshot> mergedSnapshots =
+                    mergeSpecialMonitorSnapshots(m_specialMonitorScanWatcher->result());
+                m_specialMonitorDataCache.data = mergedSnapshots;
                 m_specialMonitorDataCache.capturedAt = QDateTime::currentDateTime();
                 updateSpecialMonitorTable(m_specialMonitorDataCache.data);
                 setSpecialMonitorActionsEnabled(true);
@@ -3218,9 +3220,13 @@ void MainWindow::updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& 
         const QString tokenLabel = snapshot.source.tokenKey;
         const QString typeLabel = snapshot.packageType.isEmpty() ? tr("Unknown") : snapshot.packageType;
         const QString accountLabel = snapshot.accountName.isEmpty() ? tr("Unknown") : snapshot.accountName;
+        const QString rowTooltip = snapshot.errorMessage.isEmpty()
+            ? QString()
+            : tr("Last refresh failed: %1").arg(snapshot.errorMessage);
 
         QTableWidgetItem *providerItem = makeItem(provider);
         providerItem->setData(Qt::UserRole, provider);
+        providerItem->setToolTip(rowTooltip);
         m_specialMonitorTable->setItem(row, 0, providerItem);
         QTableWidgetItem *tokenItem = makeItem(QString());
         tokenItem->setToolTip(QString());
@@ -3238,7 +3244,7 @@ void MainWindow::updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& 
         QLabel *tokenLabelWidget = new QLabel(tokenWidget);
         tokenLabelWidget->setObjectName("specialMonitorTokenLabel");
         tokenLabelWidget->setProperty("fullToken", tokenLabel);
-        tokenLabelWidget->setToolTip(QString());
+        tokenLabelWidget->setToolTip(rowTooltip);
         tokenLabelWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         tokenLabelWidget->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
         tokenLayout->addWidget(copyBtn, 0);
@@ -3267,6 +3273,36 @@ void MainWindow::updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& 
         sources.isEmpty() ? tr("No token sources") : tr("%1 token(s)").arg(sources.size()));
 
     updateSpecialMonitorTableColumns();
+}
+
+QList<SpecialMonitorSnapshot> MainWindow::mergeSpecialMonitorSnapshots(
+    const QList<SpecialMonitorSnapshot>& freshSnapshots) const
+{
+    QHash<QString, SpecialMonitorSnapshot> cachedByKey;
+    for (const SpecialMonitorSnapshot& cachedSnapshot : m_specialMonitorDataCache.data) {
+        const QString key = specialMonitorSourceKey(cachedSnapshot.source.baseUrl,
+                                                    cachedSnapshot.source.tokenKey);
+        if (!key.isEmpty()) {
+            cachedByKey.insert(key, cachedSnapshot);
+        }
+    }
+
+    QList<SpecialMonitorSnapshot> mergedSnapshots;
+    mergedSnapshots.reserve(freshSnapshots.size());
+    for (SpecialMonitorSnapshot freshSnapshot : freshSnapshots) {
+        const QString key = specialMonitorSourceKey(freshSnapshot.source.baseUrl,
+                                                    freshSnapshot.source.tokenKey);
+        if (freshSnapshot.errorMessage.isEmpty() || !cachedByKey.contains(key)) {
+            mergedSnapshots.append(freshSnapshot);
+            continue;
+        }
+
+        SpecialMonitorSnapshot cachedSnapshot = cachedByKey.value(key);
+        cachedSnapshot.errorMessage = freshSnapshot.errorMessage;
+        mergedSnapshots.append(cachedSnapshot);
+    }
+
+    return mergedSnapshots;
 }
 
 void MainWindow::updateSpecialMonitorTableColumns()

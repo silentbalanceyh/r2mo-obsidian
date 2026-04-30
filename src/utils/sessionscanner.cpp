@@ -1078,6 +1078,10 @@ SessionStatus SessionScanner::determineStatus(qint64 pid, quint64 currentTicks, 
         return SessionStatus::Ready;
     }
 
+    if (toolName == "Claude" && !sessionPath.isEmpty()) {
+        return SessionStatus::Ready; // Claude transcript matched but no fresh active turn
+    }
+
     if (!isRunning) {
         return SessionStatus::Ready;
     }

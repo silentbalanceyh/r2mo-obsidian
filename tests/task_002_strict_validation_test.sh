@@ -50,6 +50,9 @@ run_case "Task-002 monitor status guards" \
 run_case "Task-002 monitor runtime display guards" \
     bash "$repo_root/tests/task_002_monitor_runtime_display_guard_test.sh"
 
+run_case "Special monitor cache guards" \
+    bash "$repo_root/tests/task_003_special_monitor_cache_guard_test.sh"
+
 run_case "Task-002 OpenCode guards" \
     bash "$repo_root/tests/task_002_opencode_session_guard_test.sh"
 
@@ -64,6 +67,9 @@ run_case "Task-002 remote repository selector guards" \
 
 run_case "Task-002 terminal icon guards" \
     bash "$repo_root/tests/task_002_terminal_icon_guard_test.sh"
+
+run_case "Claude idle artifact guards" \
+    bash "$repo_root/tests/task_005_claude_idle_artifact_guard_test.sh"
 
 run_case "Remote monitor scanner guards" \
     bash "$repo_root/tests/task_001_remote_monitor_session_test.sh"

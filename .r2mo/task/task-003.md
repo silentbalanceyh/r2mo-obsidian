@@ -45,3 +45,4 @@ URL：https://cmkey.cn/api/query?key=添加时
 ## Changes
 - 2026-04-26: [Team Leader] Completed task - implemented CM Key special billing fetch logic without adding provider UI entries; CM Key now uses the key query parameter, maps token_name as account, period_limit/period_used/period_remain for period statistics, shows type as every N hours, and records update time on each fetch.
 - 2026-04-26: [Team Leader] Follow-up - added the CM Key provider option to the special billing Add/Edit provider dropdown so it can be selected from the UI.
+- 2026-04-29: [Codex] Fixed transient special billing refresh zeroing: failed/timeout snapshots are now merged with the previous cache by provider/token key, preserving last known quota and usage values while surfacing the refresh error in row tooltips. Added `tests/task_003_special_monitor_cache_guard_test.sh` and verified the special monitor guards plus CMake build.

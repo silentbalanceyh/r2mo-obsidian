@@ -26,3 +26,9 @@ title: 状态计算依旧有问题
 3. **Keep-alive 缩短**：`workingKeepAliveSeconds` 从 30 秒降至 15 秒，减少误判 Working 状态的滞留时间。
 
 **影响文件：** `src/utils/sessionscanner.cpp`
+
+### 2026-04-29 — Claude 空闲 transcript 不再回落 CPU 误判
+
+- [Codex] 修复 `determineStatus()` 中 Claude 已匹配 transcript artifact 后仍继续走 CPU 兜底的问题：当 artifact 没有新鲜活跃用户轮次语义时直接返回 Ready，避免只打开 Claude Code/空闲 CLI 进程因 CPU 抖动显示 Working。
+- 新增 `tests/task_005_claude_idle_artifact_guard_test.sh`，并接入 task-002 状态验证套件，防止该回归再次出现。
+- 已通过状态守卫、CMake 配置和完整构建验证。
