@@ -34,6 +34,7 @@ public:
     static QString truncateToken(const QString& tokenKey);
 
 private:
+    SpecialMonitorSnapshot fetchSnapshot(const SpecialMonitorSource& source) const;
     SpecialMonitorSnapshot fetchPPCodingSnapshot(const SpecialMonitorSource& source) const;
     SpecialMonitorSnapshot fetchCMKeySnapshot(const SpecialMonitorSource& source) const;
 };

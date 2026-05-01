@@ -12,6 +12,9 @@
 #include <QUrl>
 #include <QUrlQuery>
 
+#include <future>
+#include <vector>
+
 namespace {
 qint64 jsonLongLong(const QJsonValue& value)
 {
@@ -34,24 +37,39 @@ bool isCMKeyProviderUrl(const QString& baseUrl)
 QList<SpecialMonitorSnapshot> SpecialMonitorFetcher::fetchSnapshots(
     const QList<SpecialMonitorSource>& sources) const
 {
-    QList<SpecialMonitorSnapshot> snapshots;
-    for (const SpecialMonitorSource& source : sources) {
-        const QString normalizedUrl = normalizeBaseUrl(source.baseUrl);
-        if (normalizedUrl == "https://code.ppchat.vip") {
-            snapshots.append(fetchPPCodingSnapshot(source));
-            continue;
-        }
-        if (isCMKeyProviderUrl(normalizedUrl)) {
-            snapshots.append(fetchCMKeySnapshot(source));
-            continue;
-        }
+    std::vector<std::future<SpecialMonitorSnapshot>> snapshotFutures;
+    snapshotFutures.reserve(sources.size());
 
-        SpecialMonitorSnapshot snapshot;
-        snapshot.source = source;
-        snapshot.errorMessage = QStringLiteral("Unsupported provider");
-        snapshots.append(snapshot);
+    for (const SpecialMonitorSource& source : sources) {
+        snapshotFutures.push_back(std::async(std::launch::async, [source]() {
+            SpecialMonitorFetcher fetcher;
+            return fetcher.fetchSnapshot(source);
+        }));
     }
+
+    QList<SpecialMonitorSnapshot> snapshots;
+    snapshots.reserve(snapshotFutures.size());
+    for (std::future<SpecialMonitorSnapshot>& future : snapshotFutures) {
+        snapshots.append(future.get());
+    }
+
     return snapshots;
+}
+
+SpecialMonitorSnapshot SpecialMonitorFetcher::fetchSnapshot(const SpecialMonitorSource& source) const
+{
+    const QString normalizedUrl = normalizeBaseUrl(source.baseUrl);
+    if (normalizedUrl == "https://code.ppchat.vip") {
+        return fetchPPCodingSnapshot(source);
+    }
+    if (isCMKeyProviderUrl(normalizedUrl)) {
+        return fetchCMKeySnapshot(source);
+    }
+
+    SpecialMonitorSnapshot snapshot;
+    snapshot.source = source;
+    snapshot.errorMessage = QStringLiteral("Unsupported provider");
+    return snapshot;
 }
 
 QString SpecialMonitorFetcher::normalizeBaseUrl(const QString& baseUrl)
