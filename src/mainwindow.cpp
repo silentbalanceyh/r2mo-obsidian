@@ -87,7 +87,8 @@ QList<SpecialMonitorProviderOption> specialMonitorProviders()
 {
     return {
         {QStringLiteral("💻 PP Coding"), QStringLiteral("https://code.ppchat.vip")},
-        {QStringLiteral("🧩 CM Key"), QStringLiteral("https://cmkey.cn/api/query")}
+        {QStringLiteral("🧩 CM Key"), QStringLiteral("https://cmkey.cn/api/query")},
+        {QStringLiteral("🐋 DeepSeek"), QStringLiteral("https://api.deepseek.com/user/balance")}
     };
 }
 
@@ -96,6 +97,18 @@ QString specialMonitorSourceKey(const QString& baseUrl, const QString& tokenKey)
     return QStringLiteral("%1|%2")
         .arg(SpecialMonitorFetcher::normalizeBaseUrl(baseUrl),
              tokenKey.trimmed());
+}
+
+bool specialMonitorSnapshotHasDisplayValues(const SpecialMonitorSnapshot& snapshot)
+{
+    return !snapshot.accountName.isEmpty() ||
+        !snapshot.packageType.isEmpty() ||
+        !snapshot.todayAddedQuota.isEmpty() ||
+        !snapshot.todayUsedQuota.isEmpty() ||
+        !snapshot.remainQuota.isEmpty() ||
+        snapshot.todayUsageCount > 0 ||
+        snapshot.todayOpusUsage > 0 ||
+        !snapshot.updatedAt.isEmpty();
 }
 
 constexpr int kMonitorProjectPathRole = Qt::UserRole;
@@ -3261,9 +3274,9 @@ void MainWindow::updateSpecialMonitorTable(const QList<SpecialMonitorSnapshot>& 
         m_specialMonitorTable->setCellWidget(row, 1, tokenWidget);
         m_specialMonitorTable->setItem(row, 2, makeItem(accountLabel));
         m_specialMonitorTable->setItem(row, 3, makeItem(typeLabel));
-        m_specialMonitorTable->setItem(row, 4, makeItem(QString::number(snapshot.todayAddedQuota), Qt::AlignCenter));
-        m_specialMonitorTable->setItem(row, 5, makeItem(QString::number(snapshot.todayUsedQuota), Qt::AlignCenter));
-        m_specialMonitorTable->setItem(row, 6, makeItem(QString::number(snapshot.remainQuota), Qt::AlignCenter));
+        m_specialMonitorTable->setItem(row, 4, makeItem(snapshot.todayAddedQuota, Qt::AlignCenter));
+        m_specialMonitorTable->setItem(row, 5, makeItem(snapshot.todayUsedQuota, Qt::AlignCenter));
+        m_specialMonitorTable->setItem(row, 6, makeItem(snapshot.remainQuota, Qt::AlignCenter));
         m_specialMonitorTable->setItem(row, 7, makeItem(QString::number(snapshot.todayUsageCount), Qt::AlignCenter));
         m_specialMonitorTable->setItem(row, 8, makeItem(QString::number(snapshot.todayOpusUsage), Qt::AlignCenter));
         m_specialMonitorTable->setItem(row, 9, makeItem(snapshot.updatedAt, Qt::AlignCenter));
@@ -3292,7 +3305,10 @@ QList<SpecialMonitorSnapshot> MainWindow::mergeSpecialMonitorSnapshots(
     for (SpecialMonitorSnapshot freshSnapshot : freshSnapshots) {
         const QString key = specialMonitorSourceKey(freshSnapshot.source.baseUrl,
                                                     freshSnapshot.source.tokenKey);
-        if (freshSnapshot.errorMessage.isEmpty() || !cachedByKey.contains(key)) {
+        const bool shouldKeepFreshSnapshot = freshSnapshot.errorMessage.isEmpty() ||
+            specialMonitorSnapshotHasDisplayValues(freshSnapshot) ||
+            !cachedByKey.contains(key);
+        if (shouldKeepFreshSnapshot) {
             mergedSnapshots.append(freshSnapshot);
             continue;
         }
@@ -3316,10 +3332,10 @@ void MainWindow::updateSpecialMonitorTableColumns()
         return;
     }
 
-    int providerWidth = qBound(120, viewportWidth / 10, 180);
+    int providerWidth = qBound(96, viewportWidth / 14, 132);
     int tokenWidth = qBound(180, viewportWidth / 8, 280);
     int accountWidth = qBound(150, viewportWidth / 9, 220);
-    int typeWidth = qBound(110, viewportWidth / 12, 150);
+    int typeWidth = qBound(150, viewportWidth / 8, 240);
     int addedWidth = qBound(110, viewportWidth / 13, 150);
     int usedWidth = qBound(110, viewportWidth / 13, 150);
     int remainWidth = qBound(110, viewportWidth / 13, 150);
@@ -3353,8 +3369,8 @@ void MainWindow::updateSpecialMonitorTableColumns()
         shrink(tokenWidth, 160);
         shrink(updatedWidth, 136);
         shrink(accountWidth, 132);
-        shrink(providerWidth, 104);
-        shrink(typeWidth, 96);
+        shrink(providerWidth, 88);
+        shrink(typeWidth, 136);
         shrink(addedWidth, 96);
         shrink(usedWidth, 96);
         shrink(remainWidth, 96);
@@ -3451,9 +3467,9 @@ QWidget* MainWindow::buildSpecialMonitorPanel()
         << tr("Token")
         << tr("🔑 Account")
         << tr("⚙️ Type")
-        << tr("➕ Today Added")
-        << tr("🔥 Today Used")
-        << tr("🎯 Remain")
+        << tr("Σ Total")
+        << tr("🔥 Used")
+        << tr("💰 Balance")
         << tr("📈 Usage Count")
         << tr("💎 Opus Count")
         << tr("🕒 Updated"));

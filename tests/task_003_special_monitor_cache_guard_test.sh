@@ -31,6 +31,14 @@ require_pattern 'mergeSpecialMonitorSnapshots' "$header" \
     "Special billing refresh must expose a merge helper so failed refresh rows can preserve cached values."
 require_pattern 'freshSnapshot\.errorMessage\.isEmpty\(\)' "$source" \
     "Special billing cache merge must distinguish successful snapshots from transient fetch errors."
+require_pattern 'specialMonitorSnapshotHasDisplayValues' "$source" \
+    "Special billing cache merge must keep fresh fallback rows that contain updated display values even when they carry a warning."
+require_pattern 'const bool shouldKeepFreshSnapshot[[:space:]]*=' "$source" \
+    "Special billing cache merge must only restore cached values for failed rows with no fresh display values."
+require_pattern 'specialMonitorSnapshotHasDisplayValues\(freshSnapshot\)[[:space:]]*\|\|' "$source" \
+    "Special billing cache merge must treat fresh display values as usable data even when a warning exists."
+require_pattern '!cachedByKey\.contains\(key\)' "$source" \
+    "Special billing cache merge must keep fresh rows when no cached fallback exists."
 require_pattern 'cachedByKey' "$source" \
     "Special billing cache merge must index previous rows by stable provider/token key."
 require_pattern 'm_specialMonitorDataCache\.data[[:space:]]*=[[:space:]]*mergedSnapshots' "$source" \

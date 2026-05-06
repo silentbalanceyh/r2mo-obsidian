@@ -24,6 +24,7 @@ bash "$repo_root/tests/task_001_remote_dedupe_guard_test.sh"
 bash "$repo_root/tests/task_001_remote_claude_session_assignment_guard_test.sh"
 bash "$repo_root/tests/task_001_status_semantics_guard_test.sh"
 bash "$repo_root/tests/task_002_special_monitor_refresh_test.sh"
+bash "$repo_root/tests/task_007_deepseek_special_monitor_guard_test.sh"
 bash "$repo_root/tests/min_font_size_test.sh"
 
 echo "PASS: task-002 guard validation suite succeeded."

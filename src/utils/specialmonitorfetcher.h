@@ -14,9 +14,9 @@ struct SpecialMonitorSnapshot {
     SpecialMonitorSource source;
     QString accountName;
     QString packageType;
-    qint64 todayAddedQuota = 0;
-    qint64 todayUsedQuota = 0;
-    qint64 remainQuota = 0;
+    QString todayAddedQuota;
+    QString todayUsedQuota;
+    QString remainQuota;
     int todayUsageCount = 0;
     int todayOpusUsage = 0;
     int totalLogCount = 0;
@@ -37,6 +37,14 @@ private:
     SpecialMonitorSnapshot fetchSnapshot(const SpecialMonitorSource& source) const;
     SpecialMonitorSnapshot fetchPPCodingSnapshot(const SpecialMonitorSource& source) const;
     SpecialMonitorSnapshot fetchCMKeySnapshot(const SpecialMonitorSource& source) const;
+    SpecialMonitorSnapshot fetchDeepSeekSnapshot(const SpecialMonitorSource& source) const;
+    SpecialMonitorSnapshot fetchDeepSeekBalanceSnapshot(
+        const SpecialMonitorSource& source,
+        const QByteArray& authHeader,
+        const QString& accountName = QString(),
+        double usedAmount = 0.0,
+        int usageCount = 0,
+        bool usageCostAvailable = false) const;
 };
 
 #endif // SPECIALMONITORFETCHER_H

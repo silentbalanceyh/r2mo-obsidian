@@ -906,18 +906,18 @@ Resident set size (RSS): %2M</source>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="3418"/>
-        <source>➕ Today Added</source>
-        <translation>➕ Today Added</translation>
+        <source>Σ Total</source>
+        <translation>Σ Total</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="3419"/>
-        <source>🔥 Today Used</source>
-        <translation>🔥 Today Used</translation>
+        <source>🔥 Used</source>
+        <translation>🔥 Used</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="3420"/>
-        <source>🎯 Remain</source>
-        <translation>🎯 Remain</translation>
+        <source>💰 Balance</source>
+        <translation>💰 Balance</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="3421"/>
